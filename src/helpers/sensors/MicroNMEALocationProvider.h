@@ -168,6 +168,11 @@ public :
     long satellitesCount() override { return nmea.getNumSatellites(); }
     uint8_t getHDOP() override { return nmea.getHDOP(); }
     void clearFix() override { nmea.clear(); time_valid = 0; }
+    bool getClockOffset(long& offset) override {
+        if (_clock == NULL || !isValid() || time_valid < 3) return false;
+        offset = (long)getTimestamp() - (long)_clock->getCurrentTime();
+        return true;
+    }
     bool applyTimeNow() override {
         if (_clock == NULL || !isValid() || time_valid < 3) return false;
         _clock->setCurrentTime(getTimestamp());

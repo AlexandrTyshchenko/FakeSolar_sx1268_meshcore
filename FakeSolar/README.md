@@ -61,7 +61,7 @@ sensor set gps_ontime <с>    макс. час пошуку
 sensor set gps_fence <м>     радіус геозони (0 = вимк.)
 sensor get gps_guard         стан фільтра fix і часу
 time force <epoch>           примусово виставити час
-sensor set gps_time_accept 1 підтвердити, що правий GPS: виставити годинник за GPS (потрібен достовірний fix)
+sensor set gps_time_accept 1 при активній тривозі: підтвердити, що правий GPS (лише та сама розбіжність, достовірний fix)
 ```
 
 `gps_cycle`, `gps_ontime`, `gps_fence` після перезавантаження повертаються до значень зі збірки.

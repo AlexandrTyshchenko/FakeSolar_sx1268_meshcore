@@ -736,6 +736,11 @@ bool EnvironmentSensorManager::querySensors(uint8_t requester_permissions, Cayen
 }
 
 #if ENV_INCLUDE_GPS
+#ifdef GPS_GUARD
+static uint32_t gpsMinEpoch();
+static uint32_t gpsMaxEpoch();
+#endif
+
 static const char* const GPS_SETTING_NAMES[] = {
   "gps",
 #ifdef GPS_DUTY_CYCLE
@@ -842,8 +847,14 @@ bool EnvironmentSensorManager::setSettingValue(const char* name, const char* val
     _time_alert = false;
     return true;
   }
-  if (strcmp(name, "gps_time_accept") == 0) {  // operator confirms GPS time is right: apply it now
+  if (strcmp(name, "gps_time_accept") == 0) {  // operator confirms the alerted GPS time is right: apply it now
+    if (!_time_alert) return false;            // only resolves an active alert; otherwise use 'time force'
     if (!_have_trusted_fix || (millis() - _last_trusted_ms) > 5000) return false;
+    long offset;
+    if (!_location->getClockOffset(offset)) return false;
+    if (labs(offset - _time_disagree_offset) > GPS_GUARD_ALERT_TOLERANCE) return false;  // not the offset that was alerted
+    uint32_t gps_time = _location->getTimestamp();
+    if (gps_time < gpsMinEpoch() || gps_time > gpsMaxEpoch()) return false;
     if (!_location->applyTimeNow()) return false;
     _time_accepted = true;
     _last_time_accept_ms = millis();
@@ -1069,6 +1080,13 @@ bool EnvironmentSensorManager::gpsIsAwake(uint8_t ioPin){
 #endif
 
 #ifdef GPS_GUARD
+// Plausible GPS time window: not before this firmware was built, at most 10 years after.
+static uint32_t gpsMinEpoch() {
+  static const uint32_t min_epoch = DateTime(__DATE__, __TIME__).unixtime() - 86400;
+  return min_epoch;
+}
+static uint32_t gpsMaxEpoch() { return gpsMinEpoch() + 10UL * 365 * 86400; }
+
 static double gpsDistanceM(double lat1, double lon1, double lat2, double lon2) {
   const double R = 6371000.0, D2R = 0.017453292519943295;
   double dlat = (lat2 - lat1) * D2R, dlon = (lon2 - lon1) * D2R;
@@ -1174,8 +1192,8 @@ bool EnvironmentSensorManager::timeGuardCallback(void* ctx, uint32_t gps_time, u
 // GPS time is only written to the clock while a trusted fix is current, it is not
 // older than this firmware, and (once the clock is valid) it only nudges the clock.
 bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_time) {
-  static const uint32_t min_epoch = DateTime(__DATE__, __TIME__).unixtime() - 86400;
-  static const uint32_t max_epoch = min_epoch + 10UL * 365 * 86400;
+  const uint32_t min_epoch = gpsMinEpoch();
+  const uint32_t max_epoch = gpsMaxEpoch();
 
   const char* why = NULL;
   long step = 0;
