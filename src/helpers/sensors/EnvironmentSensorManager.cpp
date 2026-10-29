@@ -1166,9 +1166,10 @@ bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_ti
     return false;
   }
   snprintf(_time_status, sizeof(_time_status), "ok %+lds", (long)gps_time - (long)clock_time);
-  // Only anchor the drift budget on a sync that was cross-checked against an already
-  // valid clock; a time accepted while the clock was invalid could itself be spoofed.
-  _time_accepted = (clock_time >= min_epoch);
+  // Every accepted sync anchors the drift budget (fail closed: no walking the clock in
+  // repeated MAX_STEP jumps). If a spoofed time was anchored while the clock was invalid,
+  // the operator recovers with 'time force', which resets the anchor (gps_time_reset).
+  _time_accepted = true;
   _last_time_accept_ms = millis();
   return true;
 }
