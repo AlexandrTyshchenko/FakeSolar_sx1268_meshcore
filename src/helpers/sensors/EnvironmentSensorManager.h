@@ -26,6 +26,12 @@
   #ifndef GPS_GUARD_TIME_MAX_STEP
     #define GPS_GUARD_TIME_MAX_STEP 600     // max GPS-vs-clock correction (s) once the clock is valid
   #endif
+  #ifndef GPS_GUARD_TIME_DRIFT_BASE
+    #define GPS_GUARD_TIME_DRIFT_BASE 5     // after the first sync: fixed allowance (s) ...
+  #endif
+  #ifndef GPS_GUARD_TIME_DRIFT_PPM
+    #define GPS_GUARD_TIME_DRIFT_PPM 100    // ... plus clock drift since that sync (~8.6 s/day)
+  #endif
 #endif
 
 #ifdef GPS_DUTY_CYCLE
@@ -77,6 +83,8 @@ protected:
   uint8_t  _stable_count = 0;
   char     _fix_status[24] = "no fix";
   char     _time_status[24] = "-";
+  bool     _time_accepted = false;        // a GPS time sync was accepted since boot
+  unsigned long _last_time_accept_ms = 0;
   void evaluateGpsFix();
   bool checkGpsTime(uint32_t gps_time, uint32_t clock_time);
   static bool timeGuardCallback(void* ctx, uint32_t gps_time, uint32_t clock_time);

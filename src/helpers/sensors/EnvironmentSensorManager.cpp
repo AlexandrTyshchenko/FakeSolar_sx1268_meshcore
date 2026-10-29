@@ -1142,7 +1142,15 @@ bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_ti
     why = "range";
   } else if (clock_time >= min_epoch) {   // clock already holds a plausible time
     step = (long)gps_time - (long)clock_time;
-    if (labs(step) > GPS_GUARD_TIME_MAX_STEP) why = "step";
+    long limit = GPS_GUARD_TIME_MAX_STEP;
+    if (_time_accepted) {
+      // After the first accepted sync only allow corrections the size of real clock
+      // drift, so a spoofer cannot walk the clock away in many small steps.
+      uint32_t elapsed_s = (millis() - _last_time_accept_ms) / 1000;
+      limit = GPS_GUARD_TIME_DRIFT_BASE + (long)((uint64_t)elapsed_s * GPS_GUARD_TIME_DRIFT_PPM / 1000000UL);
+      if (limit > GPS_GUARD_TIME_MAX_STEP) limit = GPS_GUARD_TIME_MAX_STEP;
+    }
+    if (labs(step) > limit) why = "step";
   }
 
   if (why) {
@@ -1154,6 +1162,8 @@ bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_ti
     return false;
   }
   snprintf(_time_status, sizeof(_time_status), "ok %+lds", (long)gps_time - (long)clock_time);
+  _time_accepted = true;
+  _last_time_accept_ms = millis();
   return true;
 }
 #endif
