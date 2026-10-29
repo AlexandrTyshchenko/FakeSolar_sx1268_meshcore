@@ -32,6 +32,12 @@
   #ifndef GPS_GUARD_TIME_DRIFT_PPM
     #define GPS_GUARD_TIME_DRIFT_PPM 100    // ... plus clock drift since that sync (~8.6 s/day)
   #endif
+  #ifndef GPS_GUARD_ALERT_MIN
+    #define GPS_GUARD_ALERT_MIN     60      // alert after GPS disagrees with the clock this long ...
+  #endif
+  #ifndef GPS_GUARD_ALERT_TOLERANCE
+    #define GPS_GUARD_ALERT_TOLERANCE 60    // ... by an offset that stays within this many seconds
+  #endif
 #endif
 
 #ifdef GPS_DUTY_CYCLE
@@ -67,7 +73,7 @@ protected:
   void start_gps();
   void stop_gps();
   void initBasicGPS();
-  mutable char _setting_buf[48];
+  mutable char _setting_buf[72];
 
   #ifdef GPS_GUARD
   // Anti-spoofing: only plausible, stable fixes update the position, and GPS
@@ -85,8 +91,14 @@ protected:
   char     _time_status[24] = "-";
   bool     _time_accepted = false;        // a GPS time sync was accepted since boot
   unsigned long _last_time_accept_ms = 0;
+  // Sustained, consistent GPS-vs-clock disagreement (rejected syncs) raises an alert.
+  bool     _time_disagree = false;
+  long     _time_disagree_offset = 0;     // GPS minus clock, seconds
+  unsigned long _time_disagree_since_ms = 0;
+  bool     _time_alert = false;
   void evaluateGpsFix();
   bool checkGpsTime(uint32_t gps_time, uint32_t clock_time);
+  void trackTimeDisagreement(long offset);
   static bool timeGuardCallback(void* ctx, uint32_t gps_time, uint32_t clock_time);
   #endif
 

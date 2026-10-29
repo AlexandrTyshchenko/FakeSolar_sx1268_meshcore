@@ -168,6 +168,13 @@ public :
     long satellitesCount() override { return nmea.getNumSatellites(); }
     uint8_t getHDOP() override { return nmea.getHDOP(); }
     void clearFix() override { nmea.clear(); time_valid = 0; }
+    bool applyTimeNow() override {
+        if (_clock == NULL || !isValid() || time_valid < 3) return false;
+        _clock->setCurrentTime(getTimestamp());
+        _time_sync_needed = false;
+        _last_time_sync = millis();
+        return true;
+    }
     bool isValid() override { return nmea.isValid(); }
 
     long getTimestamp() override { 

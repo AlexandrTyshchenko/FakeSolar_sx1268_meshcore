@@ -725,6 +725,11 @@ bool EnvironmentSensorManager::querySensors(uint8_t requester_permissions, Cayen
       _active_sensors[i].query(next_available_channel, _active_sensors[i].sub_channel, telemetry);
       next_available_channel++;
     }
+    #if ENV_INCLUDE_GPS && defined(GPS_GUARD)
+    if (_time_alert) {   // GPS-vs-clock offset in hours on its own channel while the alert is active
+      telemetry.addAnalogInput(next_available_channel++, _time_disagree_offset / 3600.0f);
+    }
+    #endif
   }
 
   return true;
@@ -790,7 +795,12 @@ const char* EnvironmentSensorManager::getSettingValue(int i) const {
       return _setting_buf;
     }
     if (strcmp(name, "gps_guard") == 0) {
-      snprintf(_setting_buf, sizeof(_setting_buf), "%s t:%s", _fix_status, _time_status);
+      if (_time_alert) {
+        snprintf(_setting_buf, sizeof(_setting_buf), "%s t:%s ALERT gps-clk %+lds %lum", _fix_status, _time_status,
+                 _time_disagree_offset, (unsigned long)((millis() - _time_disagree_since_ms) / 60000));
+      } else {
+        snprintf(_setting_buf, sizeof(_setting_buf), "%s t:%s", _fix_status, _time_status);
+      }
       return _setting_buf;
     }
     #endif
@@ -828,6 +838,18 @@ bool EnvironmentSensorManager::setSettingValue(const char* name, const char* val
   #ifdef GPS_GUARD
   if (strcmp(name, "gps_time_reset") == 0) {   // clock was set manually: drop the GPS drift anchor
     _time_accepted = false;
+    _time_disagree = false;
+    _time_alert = false;
+    return true;
+  }
+  if (strcmp(name, "gps_time_accept") == 0) {  // operator confirms GPS time is right: apply it now
+    if (!_have_trusted_fix || (millis() - _last_trusted_ms) > 5000) return false;
+    if (!_location->applyTimeNow()) return false;
+    _time_accepted = true;
+    _last_time_accept_ms = millis();
+    _time_disagree = false;
+    _time_alert = false;
+    snprintf(_time_status, sizeof(_time_status), "ok manual");
     return true;
   }
   if (strcmp(name, "gps_fence") == 0) {
@@ -1128,6 +1150,23 @@ void EnvironmentSensorManager::evaluateGpsFix() {
   snprintf(_fix_status, sizeof(_fix_status), "ok %ldsat", sats);
 }
 
+// A trusted fix whose time keeps disagreeing with the clock by the same offset is either
+// a sustained spoof or a wrong clock; either way the operator should look at it.
+void EnvironmentSensorManager::trackTimeDisagreement(long offset) {
+  unsigned long now = millis();
+  if (!_time_disagree || labs(offset - _time_disagree_offset) > GPS_GUARD_ALERT_TOLERANCE) {
+    _time_disagree = true;
+    _time_disagree_offset = offset;
+    _time_disagree_since_ms = now;
+    _time_alert = false;
+    return;
+  }
+  if (!_time_alert && (now - _time_disagree_since_ms) >= GPS_GUARD_ALERT_MIN * 60000UL) {
+    _time_alert = true;
+    MESH_DEBUG_PRINTLN("GPS TIME ALERT: GPS differs from clock by %lds for %u min", offset, GPS_GUARD_ALERT_MIN);
+  }
+}
+
 bool EnvironmentSensorManager::timeGuardCallback(void* ctx, uint32_t gps_time, uint32_t clock_time) {
   return ((EnvironmentSensorManager*)ctx)->checkGpsTime(gps_time, clock_time);
 }
@@ -1160,12 +1199,15 @@ bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_ti
   if (why) {
     if (step != 0) {
       snprintf(_time_status, sizeof(_time_status), "rej %s %lds", why, step);
+      trackTimeDisagreement(step);
     } else {
       snprintf(_time_status, sizeof(_time_status), "rej %s", why);
     }
     return false;
   }
   snprintf(_time_status, sizeof(_time_status), "ok %+lds", (long)gps_time - (long)clock_time);
+  _time_disagree = false;
+  _time_alert = false;
   // Every accepted sync anchors the drift budget (fail closed: no walking the clock in
   // repeated MAX_STEP jumps). If a spoofed time was anchored while the clock was invalid,
   // the operator recovers with 'time force', which resets the anchor (gps_time_reset).

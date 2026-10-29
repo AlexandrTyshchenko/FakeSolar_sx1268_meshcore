@@ -23,6 +23,7 @@ public:
     void setTimeGuard(TimeGuardFn fn, void* ctx) { _time_guard = fn; _time_guard_ctx = ctx; }
     virtual uint8_t getHDOP() { return 255; }   // in tenths, 255 = unknown
     virtual void clearFix() { }                  // forget the last parsed fix
+    virtual bool applyTimeNow() { return false; } // operator-confirmed: write GPS time to the clock, bypassing the guard
     virtual void syncTime() { _time_sync_needed = true; }
     virtual bool waitingTimeSync() { return _time_sync_needed; }
     virtual long getLatitude() = 0;
