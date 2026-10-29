@@ -263,6 +263,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       uint32_t curr = getRTCClock()->getCurrentTime();
       if (sender_timestamp > curr) {
         getRTCClock()->setCurrentTime(sender_timestamp + 1);
+        _sensors->setSettingValue("gps_time_reset", "1");  // manual clock set: reset GPS time anchor
         uint32_t now = getRTCClock()->getCurrentTime();
         DateTime dt = DateTime(now);
         sprintf(reply, "OK - clock set: %02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
@@ -281,6 +282,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       uint32_t secs = _atoi(&command[11]);
       if (secs > 1700000000UL) {
         getRTCClock()->setCurrentTime(secs);
+        _sensors->setSettingValue("gps_time_reset", "1");  // manual clock set: reset GPS time anchor
         DateTime dt = DateTime(getRTCClock()->getCurrentTime());
         sprintf(reply, "OK - clock forced: %02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
       } else {
@@ -291,6 +293,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       uint32_t curr = getRTCClock()->getCurrentTime();
       if (secs > curr) {
         getRTCClock()->setCurrentTime(secs);
+        _sensors->setSettingValue("gps_time_reset", "1");  // manual clock set: reset GPS time anchor
         uint32_t now = getRTCClock()->getCurrentTime();
         DateTime dt = DateTime(now);
         sprintf(reply, "OK - clock set: %02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());

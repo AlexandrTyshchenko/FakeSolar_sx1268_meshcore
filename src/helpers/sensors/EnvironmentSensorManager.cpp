@@ -826,6 +826,10 @@ bool EnvironmentSensorManager::setSettingValue(const char* name, const char* val
   }
   #endif
   #ifdef GPS_GUARD
+  if (strcmp(name, "gps_time_reset") == 0) {   // clock was set manually: drop the GPS drift anchor
+    _time_accepted = false;
+    return true;
+  }
   if (strcmp(name, "gps_fence") == 0) {
     _gps_fence_m = atoi(value);
     return true;
@@ -1162,7 +1166,9 @@ bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_ti
     return false;
   }
   snprintf(_time_status, sizeof(_time_status), "ok %+lds", (long)gps_time - (long)clock_time);
-  _time_accepted = true;
+  // Only anchor the drift budget on a sync that was cross-checked against an already
+  // valid clock; a time accepted while the clock was invalid could itself be spoofed.
+  _time_accepted = (clock_time >= min_epoch);
   _last_time_accept_ms = millis();
   return true;
 }
