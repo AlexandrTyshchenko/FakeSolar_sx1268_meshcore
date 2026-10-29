@@ -10,6 +10,58 @@
 #endif
 
 // Believe it or not, this std C function is busted on some platforms!
+// Decodes the sensor manager's CayenneLPP payload into compact text for the 'telemetry' command.
+class LPPTextReader : public CayenneLPP {
+public:
+  LPPTextReader(uint8_t size) : CayenneLPP(size) { }
+
+  void format(char* out, size_t max) {
+    size_t n = 0;
+    out[0] = 0;
+    uint8_t* buf = getBuffer();
+    uint8_t len = getSize();
+    int last_ch = -1;
+    for (uint8_t i = 0; i + 2 <= len && n < max; ) {
+      uint8_t ch = buf[i], type = buf[i + 1];
+      uint8_t size = getTypeSize(type);
+      if (size == 0 || i + 2 + size > len) break;   // unknown type or truncated
+      uint8_t* p = &buf[i + 2];
+      int w;
+      if (ch != last_ch) {
+        w = snprintf(&out[n], max - n, "%s%u:", n ? "\n" : "", ch);
+        n += (w > 0) ? w : 0; last_ch = ch;
+        if (n >= max) break;
+      }
+      if (type == LPP_GPS) {
+        w = snprintf(&out[n], max - n, " gps %.4f,%.4f %.0fm",
+                     getValue(p, 3, 10000, true), getValue(p + 3, 3, 10000, true), getValue(p + 6, 3, 100, true));
+      } else {
+        float v = getValue(p, size, getTypeMultiplier(type), getTypeSigned(type));
+        switch (type) {
+          case LPP_TEMPERATURE:         w = snprintf(&out[n], max - n, " %.1fC", v); break;
+          case LPP_RELATIVE_HUMIDITY:   w = snprintf(&out[n], max - n, " %.0f%%", v); break;
+          case LPP_BAROMETRIC_PRESSURE: w = snprintf(&out[n], max - n, " %.1fhPa", v); break;
+          case LPP_ALTITUDE:            w = snprintf(&out[n], max - n, " %.0fm", v); break;
+          case LPP_VOLTAGE:             w = snprintf(&out[n], max - n, " %.2fV", v); break;
+          case LPP_CURRENT:             w = snprintf(&out[n], max - n, " %.3fA", v); break;
+          case LPP_POWER:               w = 0; break;   // 1 W resolution, not useful here
+          default:                      w = snprintf(&out[n], max - n, " t%u=%.2f", type, v); break;
+        }
+      }
+      n += (w > 0) ? w : 0;
+      i += 2 + size;
+    }
+    if (n >= max) out[max - 1] = 0;
+  }
+};
+
+// Keeps the GPS anti-spoofing reference in sync with the configured node position.
+static void updateGpsReference(SensorManager* sensors, double lat, double lon) {
+  char ref[32];
+  snprintf(ref, sizeof(ref), "%.6f,%.6f", lat, lon);
+  sensors->setSettingValue("gps_ref", ref);
+}
+
 static uint32_t _atoi(const char* sp) {
   uint32_t n = 0;
   while (*sp && *sp >= '0' && *sp <= '9') {
@@ -225,6 +277,15 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       uint32_t now = getRTCClock()->getCurrentTime();
       DateTime dt = DateTime(now);
       sprintf(reply, "%02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
+    } else if (memcmp(command, "time force ", 11) == 0) {  // set time, allowing it to go backwards (e.g. after a GPS time spoof)
+      uint32_t secs = _atoi(&command[11]);
+      if (secs > 1700000000UL) {
+        getRTCClock()->setCurrentTime(secs);
+        DateTime dt = DateTime(getRTCClock()->getCurrentTime());
+        sprintf(reply, "OK - clock forced: %02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
+      } else {
+        strcpy(reply, "ERR: invalid epoch");
+      }
     } else if (memcmp(command, "time ", 5) == 0) {  // set time (to epoch seconds)
       uint32_t secs = _atoi(&command[5]);
       uint32_t curr = getRTCClock()->getCurrentTime();
@@ -284,6 +345,11 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       sprintf(reply, "%s (Build: %s)", _callbacks->getFirmwareVer(), _callbacks->getBuildDate());
     } else if (memcmp(command, "board", 5) == 0) {
       sprintf(reply, "%s", _board->getManufacturerName());
+    } else if (strcmp(command, "telemetry") == 0) {
+      LPPTextReader lpp(200);
+      lpp.addVoltage(TELEM_CHANNEL_SELF, (float)_board->getBattMilliVolts() / 1000.0f);
+      _sensors->querySensors(0xFF, lpp);
+      lpp.format(reply, 160);
     } else if (strcmp(command, "power") == 0) {
       const char* usb_state = _board->hasUsbPowerDetect()
                                   ? (_board->isUsbPowered() ? "yes" : "no")
@@ -385,6 +451,7 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
     } else if (memcmp(command, "gps setloc", 10) == 0) {
       _prefs->node_lat = _sensors->node_lat;
       _prefs->node_lon = _sensors->node_lon;
+      updateGpsReference(_sensors, _prefs->node_lat, _prefs->node_lon);
       savePrefs();
       strcpy(reply, "ok");
     } else if (memcmp(command, "gps advert", 10) == 0) {
@@ -541,10 +608,12 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     strcpy(reply, _prefs->disable_fwd ? "OK - repeat is now OFF" : "OK - repeat is now ON");
   } else if (memcmp(config, "lat ", 4) == 0) {
     _prefs->node_lat = atof(&config[4]);
+    updateGpsReference(_sensors, _prefs->node_lat, _prefs->node_lon);
     savePrefs();
     strcpy(reply, "OK");
   } else if (memcmp(config, "lon ", 4) == 0) {
     _prefs->node_lon = atof(&config[4]);
+    updateGpsReference(_sensors, _prefs->node_lat, _prefs->node_lon);
     savePrefs();
     strcpy(reply, "OK");
   } else if (memcmp(config, "flood.max.unscoped ", 19) == 0) {

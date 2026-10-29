@@ -166,6 +166,8 @@ public :
         return alt;
     }
     long satellitesCount() override { return nmea.getNumSatellites(); }
+    uint8_t getHDOP() override { return nmea.getHDOP(); }
+    void clearFix() override { nmea.clear(); time_valid = 0; }
     bool isValid() override { return nmea.isValid(); }
 
     long getTimestamp() override { 
@@ -243,8 +245,9 @@ public :
                 _time_sync_needed = true;
             }
             if (_time_sync_needed && time_valid > 2) {
-                if (_clock != NULL) {
-                    _clock->setCurrentTime(getTimestamp());
+                uint32_t gps_time = getTimestamp();
+                if (_clock != NULL && timeSyncAllowed(gps_time, _clock->getCurrentTime())) {
+                    _clock->setCurrentTime(gps_time);
                     _time_sync_needed = false;
                     _last_time_sync = millis();
                 }

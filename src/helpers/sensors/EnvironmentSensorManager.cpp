@@ -1,6 +1,9 @@
 #include "EnvironmentSensorManager.h"
 
 #include <Wire.h>
+#if ENV_INCLUDE_GPS && defined(GPS_GUARD)
+#include <RTClib.h>
+#endif
 
 #if ENV_PIN_SDA && ENV_PIN_SCL
 #define TELEM_WIRE &Wire1  // Use Wire1 as the I2C bus for Environment Sensors
@@ -106,8 +109,20 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
 #ifndef TELEM_INA3221_NUM_CHANNELS
 #define TELEM_INA3221_NUM_CHANNELS 3
 #endif
+// optional per-channel shunt values (ohms), default to TELEM_INA3221_SHUNT_VALUE
+#ifndef TELEM_INA3221_SHUNT_CH1
+#define TELEM_INA3221_SHUNT_CH1 TELEM_INA3221_SHUNT_VALUE
+#endif
+#ifndef TELEM_INA3221_SHUNT_CH2
+#define TELEM_INA3221_SHUNT_CH2 TELEM_INA3221_SHUNT_VALUE
+#endif
+#ifndef TELEM_INA3221_SHUNT_CH3
+#define TELEM_INA3221_SHUNT_CH3 TELEM_INA3221_SHUNT_VALUE
+#endif
 #include <Adafruit_INA3221.h>
 static Adafruit_INA3221 INA3221;
+static bool ina3221_ready = false;
+static const float INA3221_SHUNTS[3] = { TELEM_INA3221_SHUNT_CH1, TELEM_INA3221_SHUNT_CH2, TELEM_INA3221_SHUNT_CH3 };
 #endif
 
 #if ENV_INCLUDE_INA219
@@ -221,6 +236,7 @@ static void scanI2CBus(TwoWire* wire, bool found[128]) {
   for (uint8_t addr = 0x08; addr < 0x78; addr++) {
     wire->beginTransmission(addr);
     found[addr] = (wire->endTransmission() == 0);
+    if (found[addr]) MESH_DEBUG_PRINTLN("I2C device at %02X", addr);
   }
 }
 
@@ -346,8 +362,9 @@ static void query_lps22hb(uint8_t ch, uint8_t, CayenneLPP& lpp) {
 static uint8_t init_ina3221(TwoWire* wire, uint8_t addr) {
   if (!INA3221.begin(addr, wire)) return 0;
   for (int i = 0; i < TELEM_INA3221_NUM_CHANNELS; i++) {
-    INA3221.setShuntResistance(i, TELEM_INA3221_SHUNT_VALUE);
+    INA3221.setShuntResistance(i, INA3221_SHUNTS[i]);
   }
+  ina3221_ready = true;
   // Each enabled hardware channel becomes its own telemetry channel.
   uint8_t enabled = 0;
   for (int i = 0; i < TELEM_INA3221_NUM_CHANNELS; i++) {
@@ -372,6 +389,17 @@ static void query_ina3221(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
     }
   }
 }
+
+#ifdef TELEM_INA3221_BAT_CH
+// Battery monitoring via INA3221 channel TELEM_INA3221_BAT_CH (1..3), used by the board.
+bool ina3221_read_battery(uint16_t* millivolts, float* amps) {
+  if (!ina3221_ready) return false;
+  const int i = TELEM_INA3221_BAT_CH - 1;
+  if (millivolts) *millivolts = (uint16_t)(INA3221.getBusVoltage(i) * 1000.0f);
+  if (amps) *amps = INA3221.getCurrentAmps(i);
+  return true;
+}
+#endif
 #endif
 
 #if ENV_INCLUDE_INA219
@@ -684,7 +712,11 @@ bool EnvironmentSensorManager::begin() {
 bool EnvironmentSensorManager::querySensors(uint8_t requester_permissions, CayenneLPP& telemetry) {
   next_available_channel = TELEM_CHANNEL_SELF + 1;
 
-  if (requester_permissions & TELEM_PERM_LOCATION && gps_active) {
+  bool share_location = gps_active;
+  #if ENV_INCLUDE_GPS && defined(GPS_GUARD)
+  share_location = share_location && _have_trusted_fix;   // never report an unverified position
+  #endif
+  if (requester_permissions & TELEM_PERM_LOCATION && share_location) {
     telemetry.addGPS(TELEM_CHANNEL_SELF, node_lat, node_lon, node_altitude);
   }
 
@@ -698,31 +730,70 @@ bool EnvironmentSensorManager::querySensors(uint8_t requester_permissions, Cayen
   return true;
 }
 
+#if ENV_INCLUDE_GPS
+static const char* const GPS_SETTING_NAMES[] = {
+  "gps",
+#ifdef GPS_DUTY_CYCLE
+  "gps_cycle",    // minutes between GPS power-ups, 0 = always on
+  "gps_ontime",   // max seconds powered per cycle
+#endif
+#ifdef GPS_GUARD
+  "gps_fence",    // metres from gps_ref, 0 = off
+  "gps_ref",      // reference position "lat,lon", 0,0 = none
+  "gps_guard",    // read-only status
+#endif
+};
+static const int GPS_SETTING_COUNT = sizeof(GPS_SETTING_NAMES) / sizeof(GPS_SETTING_NAMES[0]);
+#endif
 
 int EnvironmentSensorManager::getNumSettings() const {
   int settings = 0;
   #if ENV_INCLUDE_GPS
-    if (gps_detected) settings++;  // only show GPS setting if GPS is detected
+    if (gps_detected) settings += GPS_SETTING_COUNT;  // only show GPS settings if GPS is detected
   #endif
   return settings;
 }
 
 const char* EnvironmentSensorManager::getSettingName(int i) const {
-  int settings = 0;
   #if ENV_INCLUDE_GPS
-    if (gps_detected && i == settings++) {
-      return "gps";
+    if (gps_detected && i >= 0 && i < GPS_SETTING_COUNT) {
+      return GPS_SETTING_NAMES[i];
     }
   #endif
   return NULL;
 }
 
 const char* EnvironmentSensorManager::getSettingValue(int i) const {
-  int settings = 0;
   #if ENV_INCLUDE_GPS
-    if (gps_detected && i == settings++) {
+    const char* name = getSettingName(i);
+    if (name == NULL) return NULL;
+    if (strcmp(name, "gps") == 0) {
       return gps_active ? "1" : "0";
     }
+    #ifdef GPS_DUTY_CYCLE
+    if (strcmp(name, "gps_cycle") == 0) {
+      snprintf(_setting_buf, sizeof(_setting_buf), "%lu", (unsigned long)(_gps_cycle_sec / 60));
+      return _setting_buf;
+    }
+    if (strcmp(name, "gps_ontime") == 0) {
+      snprintf(_setting_buf, sizeof(_setting_buf), "%lu", (unsigned long)_gps_ontime_sec);
+      return _setting_buf;
+    }
+    #endif
+    #ifdef GPS_GUARD
+    if (strcmp(name, "gps_fence") == 0) {
+      snprintf(_setting_buf, sizeof(_setting_buf), "%lu", (unsigned long)_gps_fence_m);
+      return _setting_buf;
+    }
+    if (strcmp(name, "gps_ref") == 0) {
+      snprintf(_setting_buf, sizeof(_setting_buf), "%.5f,%.5f", _gps_ref_lat, _gps_ref_lon);
+      return _setting_buf;
+    }
+    if (strcmp(name, "gps_guard") == 0) {
+      snprintf(_setting_buf, sizeof(_setting_buf), "%s t:%s", _fix_status, _time_status);
+      return _setting_buf;
+    }
+    #endif
   #endif
   return NULL;
 }
@@ -742,12 +813,88 @@ bool EnvironmentSensorManager::setSettingValue(const char* name, const char* val
     gps_update_interval_sec = interval_seconds > 0 ? interval_seconds : 1;
     return true;
   }
+  #ifdef GPS_DUTY_CYCLE
+  if (strcmp(name, "gps_cycle") == 0) {
+    _gps_cycle_sec = (uint32_t)atoi(value) * 60;
+    if (gps_active && !_gps_powered) gpsPowerOn();   // start a fresh window now
+    return true;
+  }
+  if (strcmp(name, "gps_ontime") == 0) {
+    uint32_t secs = atoi(value);
+    _gps_ontime_sec = secs < 30 ? 30 : secs;
+    return true;
+  }
+  #endif
+  #ifdef GPS_GUARD
+  if (strcmp(name, "gps_fence") == 0) {
+    _gps_fence_m = atoi(value);
+    return true;
+  }
+  if (strcmp(name, "gps_ref") == 0) {
+    char* end;
+    double lat = strtod(value, &end);
+    if (*end != ',') return false;
+    double lon = strtod(end + 1, NULL);
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
+    _gps_ref_lat = lat;
+    _gps_ref_lon = lon;
+    return true;
+  }
+  #endif
   #endif
   return false;  // not supported
 }
 
 #if ENV_INCLUDE_GPS
+#ifdef GPS_BAUD_AUTODETECT
+// Returns true if a complete NMEA sentence with a valid checksum arrives within timeout_ms.
+static bool gpsSeesValidNMEA(uint32_t timeout_ms) {
+  char line[100];
+  int len = -1;  // -1 = waiting for '$'
+  unsigned long start = millis();
+  while (millis() - start < timeout_ms) {
+    if (!Serial1.available()) { delay(2); continue; }
+    char c = Serial1.read();
+    if (c == '$') { len = 0; continue; }
+    if (len < 0) continue;
+    if (c == '\r' || c == '\n') {
+      line[len] = 0;
+      char* star = strchr(line, '*');
+      if (star && strlen(star) >= 3) {
+        uint8_t sum = 0;
+        for (char* p = line; p < star; p++) sum ^= (uint8_t)*p;
+        if (sum == (uint8_t)strtoul(star + 1, NULL, 16)) return true;
+      }
+      len = -1;
+    } else if (len < (int)sizeof(line) - 1) {
+      line[len++] = c;
+    } else {
+      len = -1;  // too long, not NMEA at this baud
+    }
+  }
+  return false;
+}
+
+// Probe common GNSS baud rates; leaves Serial1 open at the detected (or default) rate.
+static uint32_t detectGPSBaud() {
+  static const uint32_t bauds[] = { 9600, 115200, 38400, 57600, 19200, 4800 };
+  for (uint32_t baud : bauds) {
+    Serial1.end();
+    Serial1.begin(baud);
+    while (Serial1.available()) Serial1.read();
+    if (gpsSeesValidNMEA(2500)) return baud;
+  }
+  Serial1.end();
+  Serial1.begin(9600);
+  return 0;
+}
+#endif
+
 void EnvironmentSensorManager::initBasicGPS() {
+
+  #ifdef GPS_GUARD
+  _location->setTimeGuard(timeGuardCallback, this);
+  #endif
 
   Serial1.setPins(PIN_GPS_TX, PIN_GPS_RX);
 
@@ -781,6 +928,14 @@ void EnvironmentSensorManager::initBasicGPS() {
 
   if (gps_detected) {
     MESH_DEBUG_PRINTLN("GPS detected");
+    #ifdef GPS_BAUD_AUTODETECT
+    uint32_t baud = detectGPSBaud();
+    if (baud) {
+      MESH_DEBUG_PRINTLN("GPS baud rate: %lu", (unsigned long)baud);
+    } else {
+      MESH_DEBUG_PRINTLN("GPS baud rate not detected, using 9600");
+    }
+    #endif
     #ifdef PERSISTANT_GPS
       gps_active = true;
       return;
@@ -887,6 +1042,147 @@ bool EnvironmentSensorManager::gpsIsAwake(uint8_t ioPin){
 }
 #endif
 
+#ifdef GPS_GUARD
+static double gpsDistanceM(double lat1, double lon1, double lat2, double lon2) {
+  const double R = 6371000.0, D2R = 0.017453292519943295;
+  double dlat = (lat2 - lat1) * D2R, dlon = (lon2 - lon1) * D2R;
+  double a = sin(dlat / 2) * sin(dlat / 2) +
+             cos(lat1 * D2R) * cos(lat2 * D2R) * sin(dlon / 2) * sin(dlon / 2);
+  return 2 * R * atan2(sqrt(a), sqrt(1 - a));
+}
+
+// Called once per second while the GPS is powered: decides whether the current fix is trustworthy.
+void EnvironmentSensorManager::evaluateGpsFix() {
+  if (!_location->isValid()) {
+    _stable_count = 0;
+    snprintf(_fix_status, sizeof(_fix_status), "no fix %ldsat", _location->satellitesCount());
+    return;
+  }
+  double lat = ((double)_location->getLatitude()) / 1000000.;
+  double lon = ((double)_location->getLongitude()) / 1000000.;
+  long sats = _location->satellitesCount();
+  uint8_t hdop = _location->getHDOP();
+  unsigned long now = millis();
+
+  const char* why = NULL;
+  double dist = 0;
+  if (sats < GPS_GUARD_MIN_SATS) {
+    why = "sats";
+  } else if (hdop == 255 || hdop > GPS_GUARD_MAX_HDOP10) {
+    why = "hdop";
+  }
+  #if defined(GPS_GUARD_LAT_MIN) && defined(GPS_GUARD_LAT_MAX) && defined(GPS_GUARD_LON_MIN) && defined(GPS_GUARD_LON_MAX)
+  else if (lat < GPS_GUARD_LAT_MIN || lat > GPS_GUARD_LAT_MAX || lon < GPS_GUARD_LON_MIN || lon > GPS_GUARD_LON_MAX) {
+    why = "region";
+  }
+  #endif
+  else if (_gps_fence_m > 0 && (_gps_ref_lat != 0 || _gps_ref_lon != 0) &&
+           (dist = gpsDistanceM(_gps_ref_lat, _gps_ref_lon, lat, lon)) > _gps_fence_m) {
+    why = "fence";
+  } else if (_have_trusted_fix) {
+    dist = gpsDistanceM(_last_trusted_lat, _last_trusted_lon, lat, lon);
+    double secs = (now - _last_trusted_ms) / 1000.0;
+    if (secs < 1) secs = 1;
+    if (dist / secs > GPS_GUARD_MAX_SPEED_KMH / 3.6) why = "jump";
+  }
+
+  if (why) {
+    _stable_count = 0;
+    if (dist > 0) {
+      snprintf(_fix_status, sizeof(_fix_status), "rej %s %.1fkm", why, dist / 1000.0);
+    } else {
+      snprintf(_fix_status, sizeof(_fix_status), "rej %s", why);
+    }
+    MESH_DEBUG_PRINTLN("GPS fix rejected (%s): %f,%f sats=%ld hdop=%u", why, lat, lon, sats, hdop);
+    return;
+  }
+
+  // Require several consecutive, mutually consistent fixes.
+  if (_stable_count > 0 && gpsDistanceM(_cand_lat, _cand_lon, lat, lon) > GPS_GUARD_STABLE_M) {
+    _stable_count = 0;
+  }
+  _cand_lat = lat;
+  _cand_lon = lon;
+  if (_stable_count < 255) _stable_count++;
+  if (_stable_count < GPS_GUARD_STABLE_FIXES) {
+    snprintf(_fix_status, sizeof(_fix_status), "settle %u/%u", _stable_count, GPS_GUARD_STABLE_FIXES);
+    return;
+  }
+
+  node_lat = lat;
+  node_lon = lon;
+  node_altitude = ((double)_location->getAltitude()) / 1000.0;
+  if (!_fix_trusted) {
+    _fix_trusted = true;
+    _fix_trusted_ms = now;
+    MESH_DEBUG_PRINTLN("GPS fix trusted: %f,%f sats=%ld hdop=%u", lat, lon, sats, hdop);
+  }
+  _have_trusted_fix = true;
+  _last_trusted_ms = now;
+  _last_trusted_lat = lat;
+  _last_trusted_lon = lon;
+  snprintf(_fix_status, sizeof(_fix_status), "ok %ldsat", sats);
+}
+
+bool EnvironmentSensorManager::timeGuardCallback(void* ctx, uint32_t gps_time, uint32_t clock_time) {
+  return ((EnvironmentSensorManager*)ctx)->checkGpsTime(gps_time, clock_time);
+}
+
+// GPS time is only written to the clock while a trusted fix is current, it is not
+// older than this firmware, and (once the clock is valid) it only nudges the clock.
+bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_time) {
+  static const uint32_t min_epoch = DateTime(__DATE__, __TIME__).unixtime() - 86400;
+  static const uint32_t max_epoch = min_epoch + 10UL * 365 * 86400;
+
+  const char* why = NULL;
+  long step = 0;
+  if (!_have_trusted_fix || (millis() - _last_trusted_ms) > 5000) {
+    why = "nofix";
+  } else if (gps_time < min_epoch || gps_time > max_epoch) {
+    why = "range";
+  } else if (clock_time >= min_epoch) {   // clock already holds a plausible time
+    step = (long)gps_time - (long)clock_time;
+    if (labs(step) > GPS_GUARD_TIME_MAX_STEP) why = "step";
+  }
+
+  if (why) {
+    if (step != 0) {
+      snprintf(_time_status, sizeof(_time_status), "rej %s %lds", why, step);
+    } else {
+      snprintf(_time_status, sizeof(_time_status), "rej %s", why);
+    }
+    return false;
+  }
+  snprintf(_time_status, sizeof(_time_status), "ok %+lds", (long)gps_time - (long)clock_time);
+  return true;
+}
+#endif
+
+#ifdef GPS_DUTY_CYCLE
+void EnvironmentSensorManager::gpsPowerOn() {
+  if (!_gps_powered) {
+    _location->begin();
+    _location->reset();
+    _gps_powered = true;
+  }
+  _location->clearFix();     // never reuse a fix parsed in a previous window
+  _gps_window_start = millis();
+  #ifdef GPS_GUARD
+  _fix_trusted = false;
+  _stable_count = 0;
+  #endif
+  MESH_DEBUG_PRINTLN("GPS power on");
+}
+
+void EnvironmentSensorManager::gpsPowerOff() {
+  if (_gps_powered) {
+    _location->stop();
+    _gps_powered = false;
+    MESH_DEBUG_PRINTLN("GPS power off");
+  }
+}
+#endif
+
 void EnvironmentSensorManager::start_gps() {
   gps_active = true;
   #ifdef RAK_WISBLOCK_GPS
@@ -897,8 +1193,12 @@ void EnvironmentSensorManager::start_gps() {
     return;
   #endif
 
+  #ifdef GPS_DUTY_CYCLE
+  gpsPowerOn();
+  #else
   _location->begin();
   _location->reset();
+  #endif
 
 #ifndef PIN_GPS_EN
   MESH_DEBUG_PRINTLN("Start GPS is N/A on this board. Actual GPS state unchanged");
@@ -915,7 +1215,11 @@ void EnvironmentSensorManager::stop_gps() {
     return;
   #endif
 
+  #ifdef GPS_DUTY_CYCLE
+  gpsPowerOff();
+  #else
   _location->stop();
+  #endif
 
   #ifndef PIN_GPS_EN
   MESH_DEBUG_PRINTLN("Stop GPS is N/A on this board. Actual GPS state unchanged");
@@ -942,6 +1246,8 @@ void EnvironmentSensorManager::loop() {
       node_altitude = ((double)_location->getAltitude()) / 1000.0;
       MESH_DEBUG_PRINTLN("lat %f lon %f alt %f", node_lat, node_lon, node_altitude);
     }
+    #elif defined(GPS_GUARD)
+    // position is updated by evaluateGpsFix() below, only from trusted fixes
     #else
     if (_location->isValid()) {
       node_lat = ((double)_location->getLatitude())/1000000.;
@@ -954,6 +1260,34 @@ void EnvironmentSensorManager::loop() {
     }
     next_gps_update = millis() + (gps_update_interval_sec * 1000);
   }
+
+  #if defined(GPS_GUARD) && !defined(RAK_WISBLOCK_GPS)
+  static unsigned long next_guard_check = 0;
+  if (gps_active && _location->isEnabled() && (long)(millis() - next_guard_check) > 0) {
+    next_guard_check = millis() + 1000;
+    evaluateGpsFix();
+  }
+  #endif
+
+  #ifdef GPS_DUTY_CYCLE
+  if (gps_active && _gps_cycle_sec > 0) {
+    unsigned long now = millis();
+    if (_gps_powered) {
+      uint32_t on_secs = (now - _gps_window_start) / 1000;
+      #ifdef GPS_GUARD
+      // done once a trusted fix exists and the time sync had a chance to run
+      bool done = _fix_trusted && (!_location->waitingTimeSync() || (now - _fix_trusted_ms) > 20000);
+      #else
+      bool done = _location->isValid() && !_location->waitingTimeSync();
+      #endif
+      if (done || on_secs >= _gps_ontime_sec) gpsPowerOff();
+    } else if ((long)(now - (_gps_window_start + _gps_cycle_sec * 1000UL)) >= 0) {
+      gpsPowerOn();
+    }
+  } else if (gps_active && !_gps_powered) {
+    gpsPowerOn();   // cycling disabled: keep the GPS on
+  }
+  #endif
   #endif
   #if ENV_INCLUDE_BME680_BSEC
   if (bsec_active && bsec_iaq.run()) {
