@@ -32,6 +32,9 @@
   #ifndef GPS_GUARD_TIME_DRIFT_PPM
     #define GPS_GUARD_TIME_DRIFT_PPM 100    // ... plus clock drift since that sync (~8.6 s/day)
   #endif
+  #ifndef GPS_GUARD_SPOOF_GAP_MS
+    #define GPS_GUARD_SPOOF_GAP_MS    60000   // rejections less than this apart belong to one spoofing event
+  #endif
   #ifndef GPS_GUARD_ALERT_MIN
     #define GPS_GUARD_ALERT_MIN     60      // alert after GPS disagrees with the clock this long ...
   #endif
@@ -96,9 +99,14 @@ protected:
   long     _time_disagree_offset = 0;     // GPS minus clock, seconds
   unsigned long _time_disagree_since_ms = 0;
   bool     _time_alert = false;
+  // Spoofing history: rejections closer than GPS_GUARD_SPOOF_GAP_MS count as one event.
+  uint16_t _spoof_events = 0;
+  unsigned long _last_spoof_ms = 0;
+  const char* _last_spoof_reason = "";
   void evaluateGpsFix();
   bool checkGpsTime(uint32_t gps_time, uint32_t clock_time);
   void trackTimeDisagreement(long offset);
+  void noteSpoof(const char* reason);
   static bool timeGuardCallback(void* ctx, uint32_t gps_time, uint32_t clock_time);
   #endif
 

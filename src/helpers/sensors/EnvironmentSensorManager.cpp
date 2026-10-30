@@ -726,6 +726,9 @@ bool EnvironmentSensorManager::querySensors(uint8_t requester_permissions, Cayen
       next_available_channel++;
     }
     #if ENV_INCLUDE_GPS && defined(GPS_GUARD)
+    if (gps_detected) {  // number of GPS spoofing events since boot
+      telemetry.addGenericSensor(next_available_channel++, _spoof_events);
+    }
     if (_time_alert) {   // GPS-vs-clock offset in hours on its own channel while the alert is active
       telemetry.addAnalogInput(next_available_channel++, _time_disagree_offset / 3600.0f);
     }
@@ -751,6 +754,7 @@ static const char* const GPS_SETTING_NAMES[] = {
   "gps_fence",    // metres from gps_ref, 0 = off
   "gps_ref",      // reference position "lat,lon", 0,0 = none
   "gps_guard",    // read-only status
+  "gps_spoof",    // read-only spoofing history; keep last and <= 24 chars (companion custom vars frame)
 #endif
 };
 static const int GPS_SETTING_COUNT = sizeof(GPS_SETTING_NAMES) / sizeof(GPS_SETTING_NAMES[0]);
@@ -798,6 +802,15 @@ const char* EnvironmentSensorManager::getSettingValue(int i) const {
     if (strcmp(name, "gps_ref") == 0) {
       // ";" not ",": companion custom vars are sent as "name:value,name:value"
       snprintf(_setting_buf, sizeof(_setting_buf), "%.5f;%.5f", _gps_ref_lat, _gps_ref_lon);
+      return _setting_buf;
+    }
+    if (strcmp(name, "gps_spoof") == 0) {
+      if (_spoof_events == 0) {
+        snprintf(_setting_buf, 25, "0x");
+      } else {
+        snprintf(_setting_buf, 25, "%ux %lum %s", _spoof_events,
+                 (unsigned long)((millis() - _last_spoof_ms) / 60000), _last_spoof_reason);
+      }
       return _setting_buf;
     }
     if (strcmp(name, "gps_guard") == 0) {
@@ -1139,6 +1152,9 @@ void EnvironmentSensorManager::evaluateGpsFix() {
       snprintf(_fix_status, sizeof(_fix_status), "rej %s", why);
     }
     MESH_DEBUG_PRINTLN("GPS fix rejected (%s): %f,%f sats=%ld hdop=%u", why, lat, lon, sats, hdop);
+    if (strcmp(why, "region") == 0 || strcmp(why, "fence") == 0 || strcmp(why, "jump") == 0) {
+      noteSpoof(why);   // "sats"/"hdop" are poor reception, not spoofing
+    }
     return;
   }
 
@@ -1186,6 +1202,16 @@ void EnvironmentSensorManager::trackTimeDisagreement(long offset) {
   }
 }
 
+void EnvironmentSensorManager::noteSpoof(const char* reason) {
+  unsigned long now = millis();
+  if (_spoof_events == 0 || (now - _last_spoof_ms) > GPS_GUARD_SPOOF_GAP_MS) {
+    if (_spoof_events < 65535) _spoof_events++;
+    MESH_DEBUG_PRINTLN("GPS spoofing event #%u (%s)", _spoof_events, reason);
+  }
+  _last_spoof_ms = now;
+  _last_spoof_reason = reason;
+}
+
 bool EnvironmentSensorManager::timeGuardCallback(void* ctx, uint32_t gps_time, uint32_t clock_time) {
   return ((EnvironmentSensorManager*)ctx)->checkGpsTime(gps_time, clock_time);
 }
@@ -1221,6 +1247,9 @@ bool EnvironmentSensorManager::checkGpsTime(uint32_t gps_time, uint32_t clock_ti
       trackTimeDisagreement(step);
     } else {
       snprintf(_time_status, sizeof(_time_status), "rej %s", why);
+    }
+    if (strcmp(why, "step") == 0 || strcmp(why, "range") == 0) {
+      noteSpoof("time");   // a trusted fix carrying an implausible time
     }
     return false;
   }

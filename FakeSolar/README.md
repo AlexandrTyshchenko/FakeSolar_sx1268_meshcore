@@ -60,6 +60,7 @@ sensor set gps_cycle <хв>    інтервал GPS (0 = постійно)
 sensor set gps_ontime <с>    макс. час пошуку
 sensor set gps_fence <м>     радіус геозони (0 = вимк.)
 sensor get gps_guard         стан фільтра fix і часу
+sensor get gps_spoof         історія спуфінгу з моменту старту: <подій>x <хв тому>m <причина>
 time force <epoch>           примусово виставити час
 sensor set gps_time_accept 1 при активній тривозі: підтвердити, що правий GPS (лише та сама розбіжність, достовірний fix)
 ```

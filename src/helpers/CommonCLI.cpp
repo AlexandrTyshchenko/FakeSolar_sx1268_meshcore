@@ -46,6 +46,7 @@ public:
           case LPP_CURRENT:             w = snprintf(&out[n], max - n, " %.3fA", v); break;
           case LPP_POWER:               w = 0; break;   // 1 W resolution, not useful here
           case LPP_ANALOG_INPUT:        w = snprintf(&out[n], max - n, " %.2f", v); break;
+          case LPP_GENERIC_SENSOR:      w = snprintf(&out[n], max - n, " %.0f", v); break;
           default:                      w = snprintf(&out[n], max - n, " t%u=%.2f", type, v); break;
         }
       }
