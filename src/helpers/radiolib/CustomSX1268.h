@@ -81,6 +81,14 @@ class CustomSX1268 : public SX1268 {
       setRfSwitchPins(SX126X_RXEN, SX126X_TXEN);
   #endif 
 
+  // undocumented RX sensitivity patch, as in CustomSX1262 (for modules with an external LNA)
+  #ifdef SX126X_REGISTER_PATCH
+    uint8_t r_data = 0;
+    readRegister(0x8B5, &r_data, 1);
+    r_data |= 0x01;
+    writeRegister(0x8B5, &r_data, 1);
+  #endif
+
       return true;  // success
     }
 
