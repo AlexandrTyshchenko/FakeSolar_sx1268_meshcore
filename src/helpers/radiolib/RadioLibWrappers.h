@@ -20,6 +20,7 @@ protected:
   bool _cad_enabled;
   uint16_t _num_floor_samples;
   int32_t _floor_sample_sum;
+  uint32_t _rx_started_at;
   uint8_t _preamble_sf;
 
   void idle();

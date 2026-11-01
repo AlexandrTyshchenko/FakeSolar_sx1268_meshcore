@@ -10,6 +10,11 @@
 
 #define NUM_NOISE_FLOOR_SAMPLES  64
 #define SAMPLING_THRESHOLD  14
+// RSSI reads low for a few ms after Rx starts (measured on SX1268, BW 62.5: -127 -> real
+// level in ~8 ms after an AGC reset); floor samples taken then drag the floor far down.
+#ifndef NOISE_FLOOR_SETTLE_MILLIS
+  #define NOISE_FLOOR_SETTLE_MILLIS  50
+#endif
 
 static volatile uint8_t state = STATE_IDLE;
 
@@ -41,6 +46,7 @@ void RadioLibWrapper::begin() {
   // start average out some samples
   _num_floor_samples = 0;
   _floor_sample_sum = 0;
+  _rx_started_at = 0;
 }
 
 uint32_t RadioLibWrapper::getRngSeed() {
@@ -89,7 +95,7 @@ void RadioLibWrapper::resetAGC() {
 
 void RadioLibWrapper::loop() {
   if (state == STATE_RX && _num_floor_samples < NUM_NOISE_FLOOR_SAMPLES) {
-    if (!isReceivingPacket()) {
+    if (!isReceivingPacket() && millis() - _rx_started_at >= NOISE_FLOOR_SETTLE_MILLIS) {
       int rssi = getCurrentRSSI();
       if (rssi < _noise_floor + SAMPLING_THRESHOLD) {  // only consider samples below current floor + sampling THRESHOLD
         _num_floor_samples++;
@@ -116,6 +122,7 @@ void RadioLibWrapper::startRecv() {
   int err = _radio->startReceive();
   if (err == RADIOLIB_ERR_NONE) {
     state = STATE_RX;
+    _rx_started_at = millis();
   } else {
     MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
   }
@@ -152,6 +159,7 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
     int err = _radio->startReceive();
     if (err == RADIOLIB_ERR_NONE) {
       state = STATE_RX;
+      _rx_started_at = millis();
     } else {
       MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
     }
