@@ -57,6 +57,10 @@ class CustomSX1268 : public SX1268 {
       }
     
       setCRC(1);
+
+      // keep the TCXO running in standby: otherwise every Rx/Tx start from STDBY_RC
+      // first waits for the TCXO start-up delay
+      if (tcxo > 0.0f) setStandbyXOSC(true);
   
   #ifdef SX126X_CURRENT_LIMIT
       setCurrentLimit(SX126X_CURRENT_LIMIT);
