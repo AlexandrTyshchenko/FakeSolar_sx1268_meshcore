@@ -26,6 +26,9 @@ public:
     if (ina3221ReadBattery(&mv, NULL)) return mv;   // falls back to the ADC until the INA3221 is up
   #endif
     analogReadResolution(12);
+  #ifdef BATT_ADC_SAMPLE_TIME_US
+    analogSampleTime(BATT_ADC_SAMPLE_TIME_US);  // longer acquisition for high-impedance dividers
+  #endif
 
     uint32_t raw = 0;
     for (int i = 0; i < BATTERY_SAMPLES; i++) {
