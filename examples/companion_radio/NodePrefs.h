@@ -36,7 +36,10 @@ public:
   uint8_t  vibe_quiet = 0;
   uint8_t  gps_enabled = 0;      // GPS enabled flag (0=disabled, 1=enabled)
   uint32_t gps_interval = 0;     // GPS read interval in seconds
-  uint32_t gps_period = 0;       // periodic acquisition interval in seconds
+#ifndef GPS_PERIOD_DEFAULT
+  #define GPS_PERIOD_DEFAULT 0
+#endif
+  uint32_t gps_period = GPS_PERIOD_DEFAULT;  // periodic acquisition interval in seconds
   int32_t gps_fence = -1;        // GPS_GUARD fence in metres, 0 = off, -1 = build default
   uint8_t gps_guard = 1;         // GPS_GUARD on/off
   uint8_t autoadd_config = 0;    // bitmask for auto-add contacts config

@@ -57,6 +57,10 @@ class CustomSX1268 : public SX1268 {
       }
     
       setCRC(1);
+
+      // keep the TCXO running in standby: otherwise every Rx/Tx start from STDBY_RC
+      // first waits for the TCXO start-up delay
+      if (tcxo > 0.0f) setStandbyXOSC(true);
   
   #ifdef SX126X_CURRENT_LIMIT
       setCurrentLimit(SX126X_CURRENT_LIMIT);
@@ -76,6 +80,14 @@ class CustomSX1268 : public SX1268 {
     #endif
       setRfSwitchPins(SX126X_RXEN, SX126X_TXEN);
   #endif 
+
+  // undocumented RX sensitivity patch, as in CustomSX1262 (for modules with an external LNA)
+  #ifdef SX126X_REGISTER_PATCH
+    uint8_t r_data = 0;
+    readRegister(0x8B5, &r_data, 1);
+    r_data |= 0x01;
+    writeRegister(0x8B5, &r_data, 1);
+  #endif
 
       return true;  // success
     }
