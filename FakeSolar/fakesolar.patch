@@ -1,0 +1,597 @@
+diff --git a/examples/companion_radio/NodePrefs.h b/examples/companion_radio/NodePrefs.h
+index 6aa3d47c..8f9add64 100644
+--- a/examples/companion_radio/NodePrefs.h
++++ b/examples/companion_radio/NodePrefs.h
+@@ -36,7 +36,10 @@ public:
+   uint8_t  vibe_quiet = 0;
+   uint8_t  gps_enabled = 0;      // GPS enabled flag (0=disabled, 1=enabled)
+   uint32_t gps_interval = 0;     // GPS read interval in seconds
+-  uint32_t gps_period = 0;       // periodic acquisition interval in seconds
++#ifndef GPS_PERIOD_DEFAULT
++  #define GPS_PERIOD_DEFAULT 0
++#endif
++  uint32_t gps_period = GPS_PERIOD_DEFAULT;  // periodic acquisition interval in seconds
+   int32_t gps_fence = -1;        // GPS_GUARD fence in metres, 0 = off, -1 = build default
+   uint8_t gps_guard = 1;         // GPS_GUARD on/off
+   uint8_t autoadd_config = 0;    // bitmask for auto-add contacts config
+diff --git a/src/Dispatcher.cpp b/src/Dispatcher.cpp
+index c0610b7f..10b3e975 100644
+--- a/src/Dispatcher.cpp
++++ b/src/Dispatcher.cpp
+@@ -15,6 +15,9 @@ namespace mesh {
+ #ifndef NOISE_FLOOR_CALIB_INTERVAL
+   #define NOISE_FLOOR_CALIB_INTERVAL   2000     // 2 seconds
+ #endif
++#ifndef AGC_FORCED_RESET_MILLIS
++  #define AGC_FORCED_RESET_MILLIS  (24UL*60*60*1000)  // reset AGC at least once a day, even on a busy channel
++#endif
+ 
+ void Dispatcher::begin() {
+   n_sent_flood = n_sent_direct = 0;
+@@ -131,7 +134,20 @@ void Dispatcher::loop() {
+   }
+ 
+   if (getAGCResetInterval() > 0 && millisHasNowPassed(next_agc_reset_time)) {
+-    _radio->resetAGC();
++    // a reset takes the radio off the air, so (as in Meshtastic) skip it while packets are still
++    // being decoded: the gain is not stuck then. Still reset at least once per AGC_FORCED_RESET_MILLIS.
++    unsigned long now = _ms->getMillis();
++    bool hearing = last_rx_good_time != 0 && now - last_rx_good_time < (unsigned long) getAGCResetInterval();
++    bool forced = last_agc_reset_time == 0 || now - last_agc_reset_time >= AGC_FORCED_RESET_MILLIS;
++    if (_mgr->getOutboundTotal() > 0) {
++      MESH_DEBUG_PRINTLN("%s Dispatcher::loop(): AGC reset skipped, tx queued", getLogDateTime());
++    } else if (hearing && !forced) {
++      MESH_DEBUG_PRINTLN("%s Dispatcher::loop(): AGC reset skipped, last rx %lu ms ago", getLogDateTime(), now - last_rx_good_time);
++    } else {
++      MESH_DEBUG_PRINTLN("%s Dispatcher::loop(): AGC reset", getLogDateTime());
++      _radio->resetAGC();
++      last_agc_reset_time = now ? now : 1;
++    }
+     next_agc_reset_time = futureMillis(getAGCResetInterval());
+   }
+ 
+@@ -236,6 +252,7 @@ void Dispatcher::checkRecv() {
+     }
+     #endif
+     logRx(pkt, pkt->getRawLength(), score);   // hook for custom logging
++    last_rx_good_time = _ms->getMillis();
+ 
+     if (pkt->isRouteFlood()) {
+       n_recv_flood++;
+diff --git a/src/Dispatcher.h b/src/Dispatcher.h
+index aad6cba3..646ce967 100644
+--- a/src/Dispatcher.h
++++ b/src/Dispatcher.h
+@@ -122,6 +122,7 @@ class Dispatcher {
+   unsigned long cad_busy_start;
+   unsigned long radio_nonrx_start;
+   unsigned long next_floor_calib_time, next_agc_reset_time;
++  unsigned long last_rx_good_time, last_agc_reset_time;
+   bool  prev_isrecv_mode;
+   uint32_t n_sent_flood, n_sent_direct;
+   uint32_t n_recv_flood, n_recv_direct;
+@@ -146,6 +147,7 @@ protected:
+     next_tx_time = ms.getMillis();
+     cad_busy_start = 0;
+     next_floor_calib_time = next_agc_reset_time = 0;
++    last_rx_good_time = last_agc_reset_time = 0;
+     _err_flags = 0;
+     radio_nonrx_start = 0;
+     prev_isrecv_mode = true;
+diff --git a/src/helpers/CommonCLI.cpp b/src/helpers/CommonCLI.cpp
+index 2c79bae1..51414a65 100644
+--- a/src/helpers/CommonCLI.cpp
++++ b/src/helpers/CommonCLI.cpp
+@@ -9,6 +9,53 @@
+ #define BRIDGE_MAX_BAUD 115200
+ #endif
+ 
++// Decodes the sensor manager's CayenneLPP payload into compact text for the 'telemetry' command.
++class LPPTextReader : public CayenneLPP {
++public:
++  LPPTextReader(uint8_t size) : CayenneLPP(size) { }
++
++  void format(char* out, size_t max) {
++    size_t n = 0;
++    out[0] = 0;
++    uint8_t* buf = getBuffer();
++    uint8_t len = getSize();
++    int last_ch = -1;
++    for (uint8_t i = 0; i + 2 <= len && n < max; ) {
++      uint8_t ch = buf[i], type = buf[i + 1];
++      uint8_t size = getTypeSize(type);
++      if (size == 0 || i + 2 + size > len) break;   // unknown type or truncated
++      uint8_t* p = &buf[i + 2];
++      int w;
++      if (ch != last_ch) {
++        w = snprintf(&out[n], max - n, "%s%u:", n ? "\n" : "", ch);
++        n += (w > 0) ? w : 0; last_ch = ch;
++        if (n >= max) break;
++      }
++      if (type == LPP_GPS) {
++        w = snprintf(&out[n], max - n, " gps %.4f,%.4f %.0fm",
++                     getValue(p, 3, 10000, true), getValue(p + 3, 3, 10000, true), getValue(p + 6, 3, 100, true));
++      } else {
++        float v = getValue(p, size, getTypeMultiplier(type), getTypeSigned(type));
++        switch (type) {
++          case LPP_TEMPERATURE:         w = snprintf(&out[n], max - n, " %.1fC", v); break;
++          case LPP_RELATIVE_HUMIDITY:   w = snprintf(&out[n], max - n, " %.0f%%", v); break;
++          case LPP_BAROMETRIC_PRESSURE: w = snprintf(&out[n], max - n, " %.1fhPa", v); break;
++          case LPP_ALTITUDE:            w = snprintf(&out[n], max - n, " %.0fm", v); break;
++          case LPP_VOLTAGE:             w = snprintf(&out[n], max - n, " %.2fV", v); break;
++          case LPP_CURRENT:             w = snprintf(&out[n], max - n, " %.3fA", v); break;
++          case LPP_POWER:               w = 0; break;   // 1 W resolution, not useful here
++          case LPP_ANALOG_INPUT:        w = snprintf(&out[n], max - n, " %.2f", v); break;
++          case LPP_GENERIC_SENSOR:      w = snprintf(&out[n], max - n, " %.0f", v); break;
++          default:                      w = snprintf(&out[n], max - n, " t%u=%.2f", type, v); break;
++        }
++      }
++      n += (w > 0) ? w : 0;
++      i += 2 + size;
++    }
++    if (n >= max) out[max - 1] = 0;
++  }
++};
++
+ // Believe it or not, this std C function is busted on some platforms!
+ static uint32_t _atoi(const char* sp) {
+   uint32_t n = 0;
+@@ -226,6 +273,16 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
+       uint32_t now = getRTCClock()->getCurrentTime();
+       DateTime dt = DateTime(now);
+       sprintf(reply, "%02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
++    } else if (memcmp(command, "time force ", 11) == 0) {  // set time, allowing it to go backwards (e.g. after a GPS time spoof)
++      uint32_t secs = _atoi(&command[11]);
++      if (secs > 1700000000UL) {
++        getRTCClock()->setCurrentTime(secs);
++        CommonGpsPrefs::onClockSetManually(*_sensors);
++        DateTime dt = DateTime(getRTCClock()->getCurrentTime());
++        sprintf(reply, "OK - clock forced: %02d:%02d - %d/%d/%d UTC", dt.hour(), dt.minute(), dt.day(), dt.month(), dt.year());
++      } else {
++        strcpy(reply, "ERR: invalid epoch");
++      }
+     } else if (memcmp(command, "time ", 5) == 0) {  // set time (to epoch seconds)
+       uint32_t secs = _atoi(&command[5]);
+       uint32_t curr = getRTCClock()->getCurrentTime();
+@@ -286,6 +343,11 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
+       sprintf(reply, "%s (Build: %s)", _callbacks->getFirmwareVer(), _callbacks->getBuildDate());
+     } else if (memcmp(command, "board", 5) == 0) {
+       sprintf(reply, "%s", _board->getManufacturerName());
++    } else if (strcmp(command, "telemetry") == 0) {
++      LPPTextReader lpp(200);
++      lpp.addVoltage(TELEM_CHANNEL_SELF, (float)_board->getBattMilliVolts() / 1000.0f);
++      _sensors->querySensors(0xFF, lpp);
++      lpp.format(reply, 160);
+     } else if (strcmp(command, "power") == 0) {
+       const char* usb_state = _board->hasUsbPowerDetect()
+                                   ? (_board->isUsbPowered() ? "yes" : "no")
+diff --git a/src/helpers/CommonCLI.h b/src/helpers/CommonCLI.h
+index cb85f6f9..27874f3b 100644
+--- a/src/helpers/CommonCLI.h
++++ b/src/helpers/CommonCLI.h
+@@ -62,7 +62,10 @@ public:
+   // Gps settings
+   uint8_t gps_enabled = 0;
+   uint32_t gps_interval = 0; // in seconds
+-  uint32_t gps_period = 0; // periodic acquisition interval in seconds
++#ifndef GPS_PERIOD_DEFAULT
++  #define GPS_PERIOD_DEFAULT 0
++#endif
++  uint32_t gps_period = GPS_PERIOD_DEFAULT; // periodic acquisition interval in seconds
+   int32_t gps_fence = -1;   // GPS_GUARD fence in metres, 0 = off, -1 = build default
+   uint8_t gps_guard = 1;    // GPS_GUARD on/off
+   uint8_t advert_loc_policy = 0;
+diff --git a/src/helpers/radiolib/CustomSX1268.h b/src/helpers/radiolib/CustomSX1268.h
+index f915332d..7099d070 100644
+--- a/src/helpers/radiolib/CustomSX1268.h
++++ b/src/helpers/radiolib/CustomSX1268.h
+@@ -57,6 +57,10 @@ class CustomSX1268 : public SX1268 {
+       }
+     
+       setCRC(1);
++
++      // keep the TCXO running in standby: otherwise every Rx/Tx start from STDBY_RC
++      // first waits for the TCXO start-up delay
++      if (tcxo > 0.0f) setStandbyXOSC(true);
+   
+   #ifdef SX126X_CURRENT_LIMIT
+       setCurrentLimit(SX126X_CURRENT_LIMIT);
+@@ -77,6 +81,14 @@ class CustomSX1268 : public SX1268 {
+       setRfSwitchPins(SX126X_RXEN, SX126X_TXEN);
+   #endif 
+ 
++  // undocumented RX sensitivity patch, as in CustomSX1262 (for modules with an external LNA)
++  #ifdef SX126X_REGISTER_PATCH
++    uint8_t r_data = 0;
++    readRegister(0x8B5, &r_data, 1);
++    r_data |= 0x01;
++    writeRegister(0x8B5, &r_data, 1);
++  #endif
++
+       return true;  // success
+     }
+ 
+diff --git a/src/helpers/radiolib/RadioLibWrappers.cpp b/src/helpers/radiolib/RadioLibWrappers.cpp
+index 0faeebac..11e4fcbd 100644
+--- a/src/helpers/radiolib/RadioLibWrappers.cpp
++++ b/src/helpers/radiolib/RadioLibWrappers.cpp
+@@ -10,6 +10,11 @@
+ 
+ #define NUM_NOISE_FLOOR_SAMPLES  64
+ #define SAMPLING_THRESHOLD  14
++// RSSI reads low for a few ms after Rx starts (measured on SX1268, BW 62.5: -127 -> real
++// level in ~8 ms after an AGC reset); floor samples taken then drag the floor far down.
++#ifndef NOISE_FLOOR_SETTLE_MILLIS
++  #define NOISE_FLOOR_SETTLE_MILLIS  50
++#endif
+ 
+ static volatile uint8_t state = STATE_IDLE;
+ 
+@@ -41,6 +46,7 @@ void RadioLibWrapper::begin() {
+   // start average out some samples
+   _num_floor_samples = 0;
+   _floor_sample_sum = 0;
++  _rx_started_at = 0;
+ }
+ 
+ uint32_t RadioLibWrapper::getRngSeed() {
+@@ -89,7 +95,7 @@ void RadioLibWrapper::resetAGC() {
+ 
+ void RadioLibWrapper::loop() {
+   if (state == STATE_RX && _num_floor_samples < NUM_NOISE_FLOOR_SAMPLES) {
+-    if (!isReceivingPacket()) {
++    if (!isReceivingPacket() && millis() - _rx_started_at >= NOISE_FLOOR_SETTLE_MILLIS) {
+       int rssi = getCurrentRSSI();
+       if (rssi < _noise_floor + SAMPLING_THRESHOLD) {  // only consider samples below current floor + sampling THRESHOLD
+         _num_floor_samples++;
+@@ -116,6 +122,7 @@ void RadioLibWrapper::startRecv() {
+   int err = _radio->startReceive();
+   if (err == RADIOLIB_ERR_NONE) {
+     state = STATE_RX;
++    _rx_started_at = millis();
+   } else {
+     MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
+   }
+@@ -155,6 +162,7 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
+     int err = _radio->startReceive();
+     if (err == RADIOLIB_ERR_NONE) {
+       state = STATE_RX;
++      _rx_started_at = millis();
+     } else {
+       MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
+     }
+diff --git a/src/helpers/radiolib/RadioLibWrappers.h b/src/helpers/radiolib/RadioLibWrappers.h
+index 2469e9bd..cd1c3c41 100644
+--- a/src/helpers/radiolib/RadioLibWrappers.h
++++ b/src/helpers/radiolib/RadioLibWrappers.h
+@@ -20,6 +20,7 @@ protected:
+   bool _cad_enabled;
+   uint16_t _num_floor_samples;
+   int32_t _floor_sample_sum;
++  uint32_t _rx_started_at;
+   uint8_t _preamble_sf;
+ 
+   void idle();
+diff --git a/src/helpers/radiolib/SX126xReset.h b/src/helpers/radiolib/SX126xReset.h
+index 472eb33b..89e0e04f 100644
+--- a/src/helpers/radiolib/SX126xReset.h
++++ b/src/helpers/radiolib/SX126xReset.h
+@@ -17,10 +17,15 @@ inline void sx126xResetAGC(SX126x* radio, bool rx_boost_gain) {
+     if (millis() - start > 50) break;
+     radio->mod->hal->yield();
+   }
++  // calibration not finished: skip the register writes below, the next reset retries
++  if (radio->mod->hal->digitalRead(radio->mod->getGpio())) return;
+ 
+   // Calibrate(0x7F) defaults image calibration to 902-928MHz band.
+   // Re-calibrate for the actual operating frequency.
+   radio->calibrateImage(radio->freqMHz);
++  // image calibration keeps running after BUSY drops; a register write in that
++  // window can fail and stall the chip (same 50 ms wait as in Meshtastic)
++  radio->mod->hal->delay(50);
+ 
+ #ifdef SX126X_DIO2_AS_RF_SWITCH
+   radio->setDio2AsRfSwitch(SX126X_DIO2_AS_RF_SWITCH);
+diff --git a/src/helpers/sensors/EnvironmentSensorManager.cpp b/src/helpers/sensors/EnvironmentSensorManager.cpp
+index d8f2d1d8..d62e0abc 100644
+--- a/src/helpers/sensors/EnvironmentSensorManager.cpp
++++ b/src/helpers/sensors/EnvironmentSensorManager.cpp
+@@ -100,8 +100,11 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
+ #endif
+ 
+ #if ENV_INCLUDE_INA3221
+-#ifndef TELEM_INA3221_ADDRESS
+-#define TELEM_INA3221_ADDRESS     0x42    // INA3221 3 channel current sensor I2C address
++#ifdef TELEM_INA3221_ADDRESS
++  #define TELEM_INA3221_PROBE_ALL 0     // address pinned by the variant
++#else
++  #define TELEM_INA3221_ADDRESS   0x42  // INA3221 3 channel current sensor I2C address (A0 = SDA)
++  #define TELEM_INA3221_PROBE_ALL 1     // also try the other A0 straps: 0x40 (GND), 0x41 (VS), 0x43 (SCL)
+ #endif
+ #ifndef TELEM_INA3221_SHUNT_VALUE
+ #define TELEM_INA3221_SHUNT_VALUE 0.100 // most variants will have a 0.1 ohm shunts
+@@ -109,8 +112,19 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
+ #ifndef TELEM_INA3221_NUM_CHANNELS
+ #define TELEM_INA3221_NUM_CHANNELS 3
+ #endif
++// Optional per-channel shunt values (ohms); default to TELEM_INA3221_SHUNT_VALUE.
++#ifndef TELEM_INA3221_SHUNT_CH1
++#define TELEM_INA3221_SHUNT_CH1 TELEM_INA3221_SHUNT_VALUE
++#endif
++#ifndef TELEM_INA3221_SHUNT_CH2
++#define TELEM_INA3221_SHUNT_CH2 TELEM_INA3221_SHUNT_VALUE
++#endif
++#ifndef TELEM_INA3221_SHUNT_CH3
++#define TELEM_INA3221_SHUNT_CH3 TELEM_INA3221_SHUNT_VALUE
++#endif
+ #include <Adafruit_INA3221.h>
+ static Adafruit_INA3221 INA3221;
++static const float INA3221_SHUNTS[3] = { TELEM_INA3221_SHUNT_CH1, TELEM_INA3221_SHUNT_CH2, TELEM_INA3221_SHUNT_CH3 };
+ #endif
+ 
+ #if ENV_INCLUDE_INA219
+@@ -174,6 +188,7 @@ static void scanI2CBus(TwoWire* wire, bool found[128]) {
+   for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+     wire->beginTransmission(addr);
+     found[addr] = (wire->endTransmission() == 0);
++    if (found[addr]) MESH_DEBUG_PRINTLN("I2C device at %02X", addr);
+   }
+ }
+ 
+@@ -296,16 +311,19 @@ static void query_lps22hb(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+ #endif
+ 
+ #if ENV_INCLUDE_INA3221
++static bool ina3221_ready = false;   // set once init_ina3221() succeeded
++
+ static uint8_t init_ina3221(TwoWire* wire, uint8_t addr) {
+   if (!INA3221.begin(addr, wire)) return 0;
+   for (int i = 0; i < TELEM_INA3221_NUM_CHANNELS; i++) {
+-    INA3221.setShuntResistance(i, TELEM_INA3221_SHUNT_VALUE);
++    INA3221.setShuntResistance(i, INA3221_SHUNTS[i]);
+   }
+   // Each enabled hardware channel becomes its own telemetry channel.
+   uint8_t enabled = 0;
+   for (int i = 0; i < TELEM_INA3221_NUM_CHANNELS; i++) {
+     if (INA3221.isChannelEnabled(i)) enabled++;
+   }
++  ina3221_ready = true;
+   return enabled > 0 ? enabled : 1;
+ }
+ static void query_ina3221(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
+@@ -325,6 +343,16 @@ static void query_ina3221(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
+     }
+   }
+ }
++
++#ifdef TELEM_INA3221_BAT_CH
++bool ina3221ReadBattery(uint16_t* millivolts, float* amps) {
++  if (!ina3221_ready) return false;
++  const int i = TELEM_INA3221_BAT_CH - 1;
++  if (millivolts) *millivolts = (uint16_t)(INA3221.getBusVoltage(i) * 1000.0f);
++  if (amps) *amps = INA3221.getCurrentAmps(i);
++  return true;
++}
++#endif
+ #endif
+ 
+ #if ENV_INCLUDE_INA219
+@@ -538,7 +566,14 @@ static const SensorDef SENSOR_TABLE[] = {
+   { 0x5C,                  "LPS22HB",      init_lps22hb,  query_lps22hb  },
+ #endif
+ #if ENV_INCLUDE_INA3221
++  // Listed before INA219/INA260/INA226, which share 0x40-0x41. The INA3221 driver checks the
++  // manufacturer/die ID, so another chip at these addresses is left for its own driver.
+   { TELEM_INA3221_ADDRESS, "INA3221",      init_ina3221,  query_ina3221  },
++#if TELEM_INA3221_PROBE_ALL
++  { 0x40,                  "INA3221",      init_ina3221,  query_ina3221  },
++  { 0x41,                  "INA3221",      init_ina3221,  query_ina3221  },
++  { 0x43,                  "INA3221",      init_ina3221,  query_ina3221  },
++#endif
+ #endif
+ #if ENV_INCLUDE_INA219
+   { TELEM_INA219_ADDRESS,  "INA219",       init_ina219,   query_ina219   },
+diff --git a/src/helpers/sensors/EnvironmentSensorManager.h b/src/helpers/sensors/EnvironmentSensorManager.h
+index 425415a1..cbe3e9a9 100644
+--- a/src/helpers/sensors/EnvironmentSensorManager.h
++++ b/src/helpers/sensors/EnvironmentSensorManager.h
+@@ -4,6 +4,29 @@
+ #include <helpers/SensorManager.h>
+ #include <helpers/sensors/LocationProvider.h>
+ 
++#if ENV_INCLUDE_INA3221 && defined(TELEM_INA3221_BAT_CH)
++  #if TELEM_INA3221_BAT_CH < 1 || TELEM_INA3221_BAT_CH > 3
++    #error "TELEM_INA3221_BAT_CH must be 1, 2 or 3"
++  #endif
++  #ifndef TELEM_INA3221_CHARGE_THRESHOLD_A
++    #define TELEM_INA3221_CHARGE_THRESHOLD_A 0.005f  // ignore current noise below 5 mA
++  #endif
++  // Battery monitored on INA3221 channel TELEM_INA3221_BAT_CH (1..3), for boards that take
++  // their battery voltage / charging state from it. Returns false until the INA3221 is found.
++  bool ina3221ReadBattery(uint16_t* millivolts, float* amps);
++
++  // Positive battery-channel current means charging, unless the shunt is wired the other
++  // way round (TELEM_INA3221_CHARGING_INVERT).
++  inline bool ina3221BatteryCharging() {
++    float amps;
++    if (!ina3221ReadBattery(NULL, &amps)) return false;
++  #ifdef TELEM_INA3221_CHARGING_INVERT
++    amps = -amps;
++  #endif
++    return amps > TELEM_INA3221_CHARGE_THRESHOLD_A;
++  }
++#endif
++
+ class EnvironmentSensorManager : public SensorManager {
+ protected:
+   static const int MAX_ACTIVE_SENSORS = 16;
+diff --git a/variants/fakesolar_sx1268/platformio.ini b/variants/fakesolar_sx1268/platformio.ini
+new file mode 100644
+index 00000000..894f2146
+--- /dev/null
++++ b/variants/fakesolar_sx1268/platformio.ini
+@@ -0,0 +1,104 @@
++; FakeSolar: Faketec (ProMicro nRF52840) + E22-400M22S (SX1268) + AHT20/BMP280/BME280 + INA3221 + PCF8563 + GPS
++; Based on fdlamotte/gps_refactor (GPS refactor with GPS_GUARD and the baud probe list).
++; Board sources are shared with variants/promicro.
++; SX126X_REGISTER_PATCH sets the undocumented 0x8B5 RX/AGC register bit (Semtech/Heltec advice;
++; Meshtastic sets it on every SX126x). Re-applied after each AGC reset (calibration clears it).
++
++[Faketec_SX1268]
++extends = Promicro
++build_flags = ${nrf52_base.build_flags}
++  -I variants/promicro
++  -D PROMICRO
++  -D USE_SX1268
++  -D RADIO_CLASS=CustomSX1268
++  -D WRAPPER_CLASS=CustomSX1268Wrapper
++  -D LORA_TX_POWER=22
++  -D SX126X_CURRENT_LIMIT=140
++  -D SX126X_RX_BOOSTED_GAIN=1
++  -D SX126X_REGISTER_PATCH=1
++  -D LORA_FREQ=433.650
++  -D LORA_BW=62.5
++  -D LORA_SF=8
++  -D LORA_CR=8
++  -D PIN_BOARD_SCL=7
++  -D PIN_BOARD_SDA=8
++  -D PIN_OLED_RESET=-1
++  -D PIN_USER_BTN=6
++  -D PIN_GPS_RX=3
++  -D PIN_GPS_TX=4
++  -D PIN_GPS_EN=5
++  -D GPS_BAUD_PROBE_LIST=9600,115200,38400
++  -D GPS_PERIOD_DEFAULT=1800
++  -D GPS_GUARD
++  -D GPS_GUARD_LAT_MIN=44.0
++  -D GPS_GUARD_LAT_MAX=52.5
++  -D GPS_GUARD_LON_MIN=22.0
++  -D GPS_GUARD_LON_MAX=40.3
++  -D ENV_INCLUDE_GPS=1
++  -D ENV_INCLUDE_AHTX0=1
++  -D ENV_INCLUDE_BME280=1
++  -D ENV_INCLUDE_BMP280=1
++  -D ENV_INCLUDE_INA3221=1
++  -D TELEM_INA3221_ADDRESS=0x42
++  -D TELEM_INA3221_SHUNT_CH1=0.1f
++  -D TELEM_INA3221_SHUNT_CH2=0.04f
++  -D TELEM_INA3221_SHUNT_CH3=0.04f
++  -D TELEM_INA3221_BAT_CH=2
++  -D ADC_MULTIPLIER=1.5234f
++  -D BATT_ADC_SAMPLE_TIME_US=40
++
++[env:Faketec_SX1268_repeater]
++extends = Faketec_SX1268
++build_src_filter = ${Promicro.build_src_filter}
++  +<../examples/simple_repeater>
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++build_flags = ${Faketec_SX1268.build_flags}
++  -D ADVERT_NAME='"Faketec Repeater"'
++  -D ADVERT_LAT=0.0
++  -D ADVERT_LON=0.0
++  -D ADMIN_PASSWORD='"password"'
++  -D MAX_NEIGHBOURS=50
++  -D DISPLAY_CLASS=SSD1306Display
++lib_deps = ${Promicro.lib_deps}
++  adafruit/RTClib @ ^2.1.3
++
++[env:Faketec_SX1268_sensor]
++extends = Faketec_SX1268
++build_src_filter = ${Promicro.build_src_filter}
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++  +<../examples/simple_sensor>
++build_flags = ${Faketec_SX1268.build_flags}
++  -D ADVERT_NAME='"Faketec Sensor"'
++  -D ADVERT_LAT=0.0
++  -D ADVERT_LON=0.0
++  -D ADMIN_PASSWORD='"password"'
++  -D DISPLAY_CLASS=SSD1306Display
++lib_deps = ${Promicro.lib_deps}
++
++[env:Faketec_SX1268_companion_radio_ble]
++extends = Faketec_SX1268
++board_build.ldscript = boards/nrf52840_s140_v6_extrafs.ld
++board_upload.maximum_size = 712704
++build_flags = ${Faketec_SX1268.build_flags}
++  -I examples/companion_radio/ui-new
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D BLE_PIN_CODE=123456
++  -D OFFLINE_QUEUE_SIZE=256
++  -D DISPLAY_CLASS=SSD1306Display
++build_src_filter = ${Promicro.build_src_filter}
++  +<helpers/nrf52/SerialBLEInterface.cpp>
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++  +<../examples/companion_radio/*.cpp>
++  +<../examples/companion_radio/ui-new/*.cpp>
++lib_deps = ${Promicro.lib_deps}
++  adafruit/RTClib @ ^2.1.3
++  densaugeo/base64 @ ~1.4.0
++
++[env:Faketec_SX1268_repeater_debug]
++extends = env:Faketec_SX1268_repeater
++build_flags = ${env:Faketec_SX1268_repeater.build_flags}
++  -D MESH_DEBUG=1
+diff --git a/variants/promicro/PromicroBoard.h b/variants/promicro/PromicroBoard.h
+index 605b0365..9c44f0ad 100644
+--- a/variants/promicro/PromicroBoard.h
++++ b/variants/promicro/PromicroBoard.h
+@@ -3,9 +3,12 @@
+ #include <MeshCore.h>
+ #include <Arduino.h>
+ #include <helpers/NRF52Board.h>
++#include <helpers/sensors/EnvironmentSensorManager.h>
+ 
+ #define  PIN_VBAT_READ 17
++#ifndef ADC_MULTIPLIER
+ #define  ADC_MULTIPLIER   (1.815f) // dependent on voltage divider resistors. TODO: more accurate battery tracking
++#endif
+ 
+ class PromicroBoard : public NRF52BoardDCDC {
+ protected:
+@@ -18,7 +21,14 @@ public:
+   #define BATTERY_SAMPLES 8
+ 
+   uint16_t getBattMilliVolts() override {
++  #if ENV_INCLUDE_INA3221 && defined(TELEM_INA3221_BAT_CH)
++    uint16_t mv;
++    if (ina3221ReadBattery(&mv, NULL)) return mv;   // falls back to the ADC until the INA3221 is up
++  #endif
+     analogReadResolution(12);
++  #ifdef BATT_ADC_SAMPLE_TIME_US
++    analogSampleTime(BATT_ADC_SAMPLE_TIME_US);  // longer acquisition for high-impedance dividers
++  #endif
+ 
+     uint32_t raw = 0;
+     for (int i = 0; i < BATTERY_SAMPLES; i++) {
+@@ -44,6 +54,10 @@ public:
+     }
+   }
+ 
++#if ENV_INCLUDE_INA3221 && defined(TELEM_INA3221_BAT_CH)
++  bool isChargerActive() override { return ina3221BatteryCharging(); }
++#endif
++
+   const char* getManufacturerName() const override {
+     return "ProMicro DIY";
+   }
+diff --git a/variants/promicro/target.h b/variants/promicro/target.h
+index e577ab4e..995ecdce 100644
+--- a/variants/promicro/target.h
++++ b/variants/promicro/target.h
+@@ -4,7 +4,11 @@
+ #include <RadioLib.h>
+ #include <helpers/radiolib/RadioLibWrappers.h>
+ #include <PromicroBoard.h>
+-#include <helpers/radiolib/CustomSX1262Wrapper.h>
++#ifdef USE_SX1268
++  #include <helpers/radiolib/CustomSX1268Wrapper.h>
++#else
++  #include <helpers/radiolib/CustomSX1262Wrapper.h>
++#endif
+ #include <helpers/AutoDiscoverRTCClock.h>
+ #ifdef DISPLAY_CLASS
+   #include <helpers/ui/SSD1306Display.h>
