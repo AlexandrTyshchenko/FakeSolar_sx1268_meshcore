@@ -7,8 +7,8 @@
 | | |
 |---|---|
 | Репозиторій FakeSolar | https://github.com/AlexandrTyshchenko/FakeSolar_sx1268_meshcore, гілка `main` (публічний) |
-| Основа | гілка `dev` https://github.com/meshcore-dev/MeshCore, коміт `f678f6ac` (2026-11-11). Вона вже містить новий GPS-код (#3753) з нашим захистом від спуфінгу (`GPS_GUARD`) і автовизначенням швидкості GPS |
-| Патч | `fakesolar.patch` у цій папці: усі зміни FakeSolar відносно `f678f6ac`, без готових прошивок |
+| Основа | гілка `dev` https://github.com/meshcore-dev/MeshCore, коміт `ef4477b6` (2026-11-11). Вона вже містить новий GPS-код (#3753) з нашим захистом від спуфінгу (`GPS_GUARD`) і автовизначенням швидкості GPS |
+| Патч | `fakesolar.patch` у цій папці: усі зміни FakeSolar відносно `ef4477b6`, без готових прошивок |
 
 Попередні версії FakeSolar лишаються в історії гілки `main`: на гілці `gps_refactor` (коміт `544514f5`, реліз `v1.18.0-fakesolar.1`) і з власним GPS-кодом на MeshCore 1.18.0 (коміт `f91d3a89`).
 
@@ -40,6 +40,7 @@
 | Файл | Зміна |
 |---|---|
 | `src/helpers/CommonCLI.h`, `examples/companion_radio/NodePrefs.h` | `GPS_PERIOD_DEFAULT`: інтервал GPS для нових налаштувань (у FakeSolar 1800 с). Якщо на платі вже збережено інший інтервал, діє збережений; змінюється командою `gps period` |
+| `src/helpers/sensors/GpsGuard.h`, `docs/cli_commands.md` | `gps guard`: поки GPS спить між вмиканнями, після успішної перевірки часу показує `time wait` замість `time rej nofix`. Лише відображення; запропоновано в MeshCore окремим PR |
 
 ### CLI
 
@@ -109,7 +110,7 @@ cd MeshCore
 ```bash
 git clone https://github.com/meshcore-dev/MeshCore.git
 cd MeshCore
-git checkout f678f6ac
+git checkout ef4477b6
 git apply --check /шлях/до/fakesolar.patch
 git apply /шлях/до/fakesolar.patch
 ```
@@ -166,10 +167,14 @@ gps guard          стан захисту GPS
 - захист GPS на реальному спуфінгу (позиція за ~12 000 км): усі такі fix відкинуто, час не змінено;
 - `gps fence` і `gps guard on/off` зберігаються після перезавантаження.
 
-Перевірки вище зроблено на попередній основі (`gps_refactor`, `544514f5`). Збірка на основі `dev` (`f678f6ac`) на залізі ще не перевірялась: код GPS, радіо і сенсорів FakeSolar не змінився, змінилась лише основа MeshCore.
+Перевірки вище зроблено на попередній основі (`gps_refactor`, `544514f5`). На основі `dev` (2026-11-11, repeater і repeater debug) повторно перевірено:
+- радіо, сенсори, батарея з INA3221, ознака заряджання;
+- автовизначення швидкості GPS, інтервальний режим 30 хв;
+- реальний спуфінг (знову позиція в Перу, до 12 супутників): усі fix відкинуто (`rej region`), час не прийнято (`time rej nofix`);
+- годинник, що відставав на 16 хв: GPS не виправив його сам (`time rej step 976s`, більше 10 хв), після `time force` час GPS збігається з годинником (`time ok +0s`), а між вмиканнями GPS показується `time wait`.
 
 ## Що не перевірено
 
-- Збірка на основі `dev` на залізі.
+- Тривога `ALERT` на справжньому залізі (годинник виправлено вручну, тривоги не чекали).
 - Sensor і companion на залізі (лише збірка).
 - Збірка на чистій машині: бібліотеки PlatformIO бралися з уже завантаженого кешу. Реєстр PlatformIO інколи відповідає «Download limit exceeded»: тоді треба зачекати й повторити `pio run`.
