@@ -1,5 +1,5 @@
 diff --git a/examples/companion_radio/NodePrefs.h b/examples/companion_radio/NodePrefs.h
-index 6aa3d47c..8f9add64 100644
+index c5387976..a460793f 100644
 --- a/examples/companion_radio/NodePrefs.h
 +++ b/examples/companion_radio/NodePrefs.h
 @@ -36,7 +36,10 @@ public:
@@ -261,7 +261,7 @@ index 0faeebac..11e4fcbd 100644
        MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
      }
 diff --git a/src/helpers/radiolib/RadioLibWrappers.h b/src/helpers/radiolib/RadioLibWrappers.h
-index 2469e9bd..cd1c3c41 100644
+index 02ce8343..fb047ff8 100644
 --- a/src/helpers/radiolib/RadioLibWrappers.h
 +++ b/src/helpers/radiolib/RadioLibWrappers.h
 @@ -20,6 +20,7 @@ protected:
@@ -273,7 +273,7 @@ index 2469e9bd..cd1c3c41 100644
  
    void idle();
 diff --git a/src/helpers/radiolib/SX126xReset.h b/src/helpers/radiolib/SX126xReset.h
-index 472eb33b..89e0e04f 100644
+index bce84191..802de554 100644
 --- a/src/helpers/radiolib/SX126xReset.h
 +++ b/src/helpers/radiolib/SX126xReset.h
 @@ -17,10 +17,15 @@ inline void sx126xResetAGC(SX126x* radio, bool rx_boost_gain) {
@@ -293,7 +293,7 @@ index 472eb33b..89e0e04f 100644
  #ifdef SX126X_DIO2_AS_RF_SWITCH
    radio->setDio2AsRfSwitch(SX126X_DIO2_AS_RF_SWITCH);
 diff --git a/src/helpers/sensors/EnvironmentSensorManager.cpp b/src/helpers/sensors/EnvironmentSensorManager.cpp
-index d8f2d1d8..d62e0abc 100644
+index 278677de..fabc9e7e 100644
 --- a/src/helpers/sensors/EnvironmentSensorManager.cpp
 +++ b/src/helpers/sensors/EnvironmentSensorManager.cpp
 @@ -100,8 +100,11 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
@@ -376,7 +376,7 @@ index d8f2d1d8..d62e0abc 100644
  #endif
  
  #if ENV_INCLUDE_INA219
-@@ -538,7 +566,14 @@ static const SensorDef SENSOR_TABLE[] = {
+@@ -542,7 +570,14 @@ static const SensorDef SENSOR_TABLE[] = {
    { 0x5C,                  "LPS22HB",      init_lps22hb,  query_lps22hb  },
  #endif
  #if ENV_INCLUDE_INA3221

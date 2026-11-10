@@ -7,10 +7,10 @@
 | | |
 |---|---|
 | Репозиторій FakeSolar | https://github.com/AlexandrTyshchenko/FakeSolar_sx1268_meshcore, гілка `main` (публічний) |
-| Основа | гілка `gps_refactor` https://github.com/fdlamotte/MeshCore (новий GPS-код MeshCore, meshcore-dev/MeshCore#3753), коміт `544514f5` (2026-11-09). Вона вже містить наш захист від спуфінгу (`GPS_GUARD`) і автовизначення швидкості GPS |
-| Патч | `fakesolar.patch` у цій папці: усі зміни FakeSolar відносно `544514f5`, без готових прошивок |
+| Основа | гілка `dev` https://github.com/meshcore-dev/MeshCore, коміт `f678f6ac` (2026-11-11). Вона вже містить новий GPS-код (#3753) з нашим захистом від спуфінгу (`GPS_GUARD`) і автовизначенням швидкості GPS |
+| Патч | `fakesolar.patch` у цій папці: усі зміни FakeSolar відносно `f678f6ac`, без готових прошивок |
 
-Попередня версія FakeSolar (власний GPS-код на основі MeshCore 1.18.0, коміт `f91d3a89`) лишається в історії гілки `main`.
+Попередні версії FakeSolar лишаються в історії гілки `main`: на гілці `gps_refactor` (коміт `544514f5`, реліз `v1.18.0-fakesolar.1`) і з власним GPS-кодом на MeshCore 1.18.0 (коміт `f91d3a89`).
 
 ## Що змінено відносно основи
 
@@ -35,7 +35,7 @@
 
 ### GPS і час
 
-Код GPS — з основи (`gps_refactor`). FakeSolar лише вмикає його прапорцями (див. нижче) і задає інтервал за замовчуванням:
+Код GPS — з основи (MeshCore `dev`). FakeSolar лише вмикає його прапорцями (див. нижче) і задає інтервал за замовчуванням:
 
 | Файл | Зміна |
 |---|---|
@@ -107,9 +107,9 @@ cd MeshCore
 Якщо репозиторій FakeSolar недоступний:
 
 ```bash
-git clone https://github.com/fdlamotte/MeshCore.git
+git clone https://github.com/meshcore-dev/MeshCore.git
 cd MeshCore
-git checkout 544514f5
+git checkout f678f6ac
 git apply --check /шлях/до/fakesolar.patch
 git apply /шлях/до/fakesolar.patch
 ```
@@ -166,7 +166,10 @@ gps guard          стан захисту GPS
 - захист GPS на реальному спуфінгу (позиція за ~12 000 км): усі такі fix відкинуто, час не змінено;
 - `gps fence` і `gps guard on/off` зберігаються після перезавантаження.
 
+Перевірки вище зроблено на попередній основі (`gps_refactor`, `544514f5`). Збірка на основі `dev` (`f678f6ac`) на залізі ще не перевірялась: код GPS, радіо і сенсорів FakeSolar не змінився, змінилась лише основа MeshCore.
+
 ## Що не перевірено
 
+- Збірка на основі `dev` на залізі.
 - Sensor і companion на залізі (лише збірка).
 - Збірка на чистій машині: бібліотеки PlatformIO бралися з уже завантаженого кешу. Реєстр PlatformIO інколи відповідає «Download limit exceeded»: тоді треба зачекати й повторити `pio run`.
