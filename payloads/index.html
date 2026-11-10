@@ -646,10 +646,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#get-minmaxave-sensor-nodes" class="md-nav__link">
+  <a href="#get-minmaxave-sensor-and-repeater-nodes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Get Min/Max/Ave (Sensor nodes)
+        Get Min/Max/Ave (Sensor and repeater nodes)
       
     </span>
   </a>
@@ -929,6 +929,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../repeater_history/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater health history
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stats_binary_frames/" class="md-nav__link">
         
   
@@ -1093,10 +1120,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#get-minmaxave-sensor-nodes" class="md-nav__link">
+  <a href="#get-minmaxave-sensor-and-repeater-nodes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Get Min/Max/Ave (Sensor nodes)
+        Get Min/Max/Ave (Sensor and repeater nodes)
       
     </span>
   </a>
@@ -1647,7 +1674,7 @@
 <tr>
 <td><code>0x04</code></td>
 <td>get min/max/avg</td>
-<td>get sensor node stats on time series data</td>
+<td>get sensor or repeater time series statistics</td>
 </tr>
 <tr>
 <td><code>0x05</code></td>
@@ -1720,7 +1747,7 @@
 </tr>
 </tbody>
 </table>
-<h4 id="get-minmaxave-sensor-nodes">Get Min/Max/Ave  (Sensor nodes)</h4>
+<h4 id="get-minmaxave-sensor-and-repeater-nodes">Get Min/Max/Ave (Sensor and repeater nodes)</h4>
 <table>
 <thead>
 <tr>
@@ -1757,6 +1784,44 @@
 </tr>
 </tbody>
 </table>
+<p>Requires an authenticated client with the READ_ONLY role or higher. The range includes
+samples whose age is <code>end &lt;= age &lt; start</code>, in seconds. Request integers are little-endian.
+The repeater uses exactly the sensor request and response layout.</p>
+<p>The response body (after decryption) is:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Size (bytes)</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>tag</td>
+<td>4</td>
+<td>echoed request timestamp, little-endian</td>
+</tr>
+<tr>
+<td>current time</td>
+<td>4</td>
+<td>current node RTC Unix time, little-endian</td>
+</tr>
+<tr>
+<td>series</td>
+<td>variable</td>
+<td>up to 8 series records, described below</td>
+</tr>
+</tbody>
+</table>
+<p>Each series record contains a channel byte, an LPP type byte, then min, max, and average
+in that order. Each value uses the type's Cayenne LPP size, multiplier, sign, and
+big-endian encoding. There is no count byte; parse records to the end of the response.
+Nonzero reserved bytes return only the tag and current time.</p>
+<p>Repeater history is pull-only, uses uptime internally, and omits series with no valid
+samples in the requested range. Its returned current time still comes from the RTC;
+an unset or corrected RTC does not affect sampling or range selection. See
+<a href="../repeater_history/">Repeater health history</a> for channels, retention, and build flags.</p>
 <h4 id="subscribe-to-telemetry-push-sensor-nodes">Subscribe to Telemetry push - (Sensor nodes)</h4>
 <table>
 <thead>

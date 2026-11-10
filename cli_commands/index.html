@@ -1657,6 +1657,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#repeater-health-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repeater health history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#ethernet-when-ethernet-support-is-compiled-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1955,6 +1966,33 @@
     
   
     QR Codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repeater_history/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater health history
   
 
     
@@ -3392,6 +3430,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#repeater-health-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repeater health history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#ethernet-when-ethernet-support-is-compiled-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4290,6 +4339,11 @@ region save
 <p><strong>Usage:</strong> <code>get pwrmgt.bootmv</code></p>
 <p><strong>Note:</strong> Returns an error on boards without power management support.</p>
 <hr />
+<h3 id="repeater-health-history">Repeater health history</h3>
+<p>History is queried over the mesh using the sensor-compatible <code>0x04</code> min/max/average
+request; there is no history CLI command. Retention and recording interval are controlled
+by <code>REPEATER_HISTORY_SLOTS</code> and <code>REPEATER_HISTORY_INTERVAL_SECS</code> at build time.
+See <a href="../repeater_history/">Repeater health history</a> for the channel mapping and flags.</p>
 <h3 id="ethernet-when-ethernet-support-is-compiled-in">Ethernet (when Ethernet support is compiled in)</h3>
 <p>Ethernet support is available on RAK4631 boards with a RAK13800 (W5100S) Ethernet module. Use the <code>_ethernet</code> firmware variants (e.g. <code>RAK_4631_repeater_ethernet</code>) to enable this feature.</p>
 <hr />

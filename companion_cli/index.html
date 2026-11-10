@@ -446,6 +446,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#fine-tune-the-battery-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fine-tune the battery reading
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1206,6 +1217,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../repeater_history/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repeater health history
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stats_binary_frames/" class="md-nav__link">
         
   
@@ -1380,6 +1418,17 @@
     <span class="md-ellipsis">
       
         Configure this node's timezone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fine-tune-the-battery-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fine-tune the battery reading
       
     </span>
   </a>
@@ -1959,6 +2008,15 @@
 - <code>get tz.offset</code></p>
 <p><strong>Parameters:</strong>
 - <code>offset</code>: float value of the offset in hours</p>
+<hr />
+<h4 id="fine-tune-the-battery-reading">Fine-tune the battery reading</h4>
+<p><strong>Usage:</strong>
+- <code>get adc.multiplier</code>
+- <code>set adc.multiplier &lt;value&gt;</code></p>
+<p><strong>Parameters:</strong>
+- <code>value</code>: ADC multiplier (0.0-10.0)</p>
+<p><strong>Default:</strong> <code>0.0</code> (value defined by board)</p>
+<p><strong>Note:</strong> Returns "Error: unsupported" if the board doesn't support it. Same command as on repeaters, for boards whose battery divider resistors vary (e.g. DIY ProMicro / Faketec).</p>
 <hr />
 <h3 id="radio">Radio</h3>
 <p>Radio parameters are common to all roles and handled by <code>CommonRadioPrefs</code>.</p>
