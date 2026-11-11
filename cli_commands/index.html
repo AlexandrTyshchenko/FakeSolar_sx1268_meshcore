@@ -1657,17 +1657,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#repeater-health-history" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Repeater health history
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#ethernet-when-ethernet-support-is-compiled-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1966,33 +1955,6 @@
     
   
     QR Codes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../repeater_history/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Repeater health history
   
 
     
@@ -3430,17 +3392,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#repeater-health-history" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Repeater health history
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#ethernet-when-ethernet-support-is-compiled-in" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4244,14 +4195,17 @@ region save
 <hr />
 <h4 id="view-or-change-the-gps-advert-policy">View or change the GPS advert policy</h4>
 <p><strong>Usage:</strong>
+- <code>get advert.loc</code>
+- <code>set advert.loc &lt;policy&gt;</code>
 - <code>gps advert</code>
 - <code>gps advert &lt;policy&gt;</code></p>
 <p><strong>Parameters:</strong> 
 - <code>policy</code>: <code>none</code>|<code>share</code>|<code>prefs</code> 
   - <code>none</code>: don't include location in adverts
   - <code>share</code>: share gps location (from SensorManager)
-  - <code>prefs</code>: location stored in node's lat and lon settings</p>
+  - <code>prefs</code>: location stored in node's lat and lon settings (can be different from gps value)</p>
 <p><strong>Default:</strong> <code>prefs</code></p>
+<p><strong>Note:</strong> <code>gps advert</code> command is the old format but is only accessible when a gps is attached to the unit. It has been kept for compatibility but one should prefer using <code>get/set</code> commands instead.</p>
 <hr />
 <h3 id="sensors-when-sensor-support-is-compiled-in">Sensors (When sensor support is compiled in)</h3>
 <h4 id="view-the-list-of-sensors-on-this-node">View the list of sensors on this node</h4>
@@ -4339,11 +4293,6 @@ region save
 <p><strong>Usage:</strong> <code>get pwrmgt.bootmv</code></p>
 <p><strong>Note:</strong> Returns an error on boards without power management support.</p>
 <hr />
-<h3 id="repeater-health-history">Repeater health history</h3>
-<p>History is queried over the mesh using the sensor-compatible <code>0x04</code> min/max/average
-request; there is no history CLI command. Retention and recording interval are controlled
-by <code>REPEATER_HISTORY_SLOTS</code> and <code>REPEATER_HISTORY_INTERVAL_SECS</code> at build time.
-See <a href="../repeater_history/">Repeater health history</a> for the channel mapping and flags.</p>
 <h3 id="ethernet-when-ethernet-support-is-compiled-in">Ethernet (when Ethernet support is compiled in)</h3>
 <p>Ethernet support is available on RAK4631 boards with a RAK13800 (W5100S) Ethernet module. Use the <code>_ethernet</code> firmware variants (e.g. <code>RAK_4631_repeater_ethernet</code>) to enable this feature.</p>
 <hr />
