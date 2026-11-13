@@ -7,8 +7,8 @@
 | | |
 |---|---|
 | Репозиторій FakeSolar | https://github.com/AlexandrTyshchenko/FakeSolar_sx1268_meshcore, гілка `main` (публічний) |
-| Основа | гілка `dev` https://github.com/meshcore-dev/MeshCore, коміт `c4258a5b` (2026-11-11). Вона вже містить новий GPS-код (#3753) з нашим захистом від спуфінгу (`GPS_GUARD`), автовизначенням швидкості GPS і показом `time wait` (#3801). Тривога `ALERT` у MeshCore лише в CLI: канал у телеметрії прибрано (#3813) |
-| Патч | `fakesolar.patch` у цій папці: усі зміни FakeSolar відносно `c4258a5b`, без готових прошивок |
+| Основа | гілка `dev` https://github.com/meshcore-dev/MeshCore, коміт `a4c66307` (2026-11-13). Вона вже містить новий GPS-код (#3753) з нашим захистом від спуфінгу (`GPS_GUARD`), автовизначенням швидкості GPS, показом `time wait` (#3801), лімітом пошуку до першого fix `gps firstfix` (#3823) і очікуванням 3D fix (#3821). Тривога `ALERT` у MeshCore лише в CLI: канал у телеметрії прибрано (#3813) |
+| Патч | `fakesolar.patch` у цій папці: усі зміни FakeSolar відносно `a4c66307`, без готових прошивок |
 
 Попередні версії FakeSolar лишаються в історії гілки `main`: на гілці `gps_refactor` (коміт `544514f5`, реліз `v1.18.0-fakesolar.1`) і з власним GPS-кодом на MeshCore 1.18.0 (коміт `f91d3a89`).
 
@@ -109,7 +109,7 @@ cd MeshCore
 ```bash
 git clone https://github.com/meshcore-dev/MeshCore.git
 cd MeshCore
-git checkout c4258a5b
+git checkout a4c66307
 git apply --check /шлях/до/fakesolar.patch
 git apply /шлях/до/fakesolar.patch
 ```
@@ -172,6 +172,7 @@ gps guard          стан захисту GPS
 - реальний спуфінг (знову позиція в Перу, до 12 супутників): усі fix відкинуто (`rej region`), час не прийнято (`time rej nofix`);
 - годинник, що відставав на 16 хв: GPS не виправив його сам (`time rej step 976s`, більше 10 хв), після `time force` час GPS збігається з годинником (`time ok +0s`), а між вмиканнями GPS показується `time wait`.
 На основі `dev` `c4258a5b` (2026-11-11, repeater): радіо і сенсори; `get/set advert.loc` і стара `gps advert`; `telemetry` без каналу тривоги; спуфінг, що саме йшов, відкинуто (`rej region`, `time rej nofix`).
+На основі `dev` `a4c66307` (2026-11-14, repeater): налаштування після оновлення збереглися (`gps period` 1800); `gps firstfix` показує й змінює ліміт, значення переживає перезавантаження; `gps diag` показує `fm:1` → `fm:3`; під час спуфінгу fix відкинуто (`rej region`), GPS лишається ввімкненим, поки діє ліміт першого fix. Шлях 2D fix на залізі не перевірено (2D fix тут не було).
 
 ## Що не перевірено
 
