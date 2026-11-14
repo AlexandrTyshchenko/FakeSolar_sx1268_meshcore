@@ -8,6 +8,15 @@
 #define TELEM_WIRE &Wire  // Use default I2C bus for Environment Sensors
 #endif
 
+// TELEM_NO_ALTITUDE: leave the barometric altitude out of the telemetry (it is derived from the
+// standard sea level pressure). Some clients stop parsing Cayenne LPP at an unknown type, so a
+// record they do not decode hides every sensor after it.
+#ifdef TELEM_NO_ALTITUDE
+  #define LPP_ADD_ALTITUDE(lpp, ch, value)
+#else
+  #define LPP_ADD_ALTITUDE(lpp, ch, value)  (lpp).addAltitude(ch, value)
+#endif
+
 // ============================================================
 // Sensor library includes and static driver instances
 // ============================================================
@@ -227,7 +236,7 @@ static void query_bme680(uint8_t ch, uint8_t, CayenneLPP& lpp) {
     lpp.addRelativeHumidity(ch, BME680.humidity);
     const float pressure_hpa = BME680.pressure / 100.0f;
     lpp.addBarometricPressure(ch, pressure_hpa);
-    lpp.addAltitude(ch, 44330.0f * (1.0f - powf(pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
+    LPP_ADD_ALTITUDE(lpp, ch, 44330.0f * (1.0f - powf(pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
     lpp.addGenericSensor(ch, BME680.gas_resistance);
   }
 }
@@ -249,7 +258,7 @@ static void query_bme280(uint8_t ch, uint8_t, CayenneLPP& lpp) {
     lpp.addTemperature(ch, BME280.readTemperature());
     lpp.addRelativeHumidity(ch, BME280.readHumidity());
     lpp.addBarometricPressure(ch, BME280.readPressure() / 100);
-    lpp.addAltitude(ch, BME280.readAltitude(TELEM_BME280_SEALEVELPRESSURE_HPA));
+    LPP_ADD_ALTITUDE(lpp, ch, BME280.readAltitude(TELEM_BME280_SEALEVELPRESSURE_HPA));
   }
 }
 #endif
@@ -262,7 +271,7 @@ static uint8_t init_bmp280(TwoWire*, uint8_t addr) {
 static void query_bmp280(uint8_t ch, uint8_t, CayenneLPP& lpp) {
   lpp.addTemperature(ch, BMP280.readTemperature());
   lpp.addBarometricPressure(ch, BMP280.readPressure() / 100);
-  lpp.addAltitude(ch, BMP280.readAltitude(TELEM_BMP280_SEALEVELPRESSURE_HPA));
+  LPP_ADD_ALTITUDE(lpp, ch, BMP280.readAltitude(TELEM_BMP280_SEALEVELPRESSURE_HPA));
 }
 #endif
 
@@ -422,7 +431,7 @@ static uint8_t init_bmp085(TwoWire* wire, uint8_t) {
 static void query_bmp085(uint8_t ch, uint8_t, CayenneLPP& lpp) {
   lpp.addTemperature(ch, BMP085.readTemperature());
   lpp.addBarometricPressure(ch, BMP085.readPressure() / 100);
-  lpp.addAltitude(ch, BMP085.readAltitude(TELEM_BMP085_SEALEVELPRESSURE_HPA * 100));
+  LPP_ADD_ALTITUDE(lpp, ch, BMP085.readAltitude(TELEM_BMP085_SEALEVELPRESSURE_HPA * 100));
 }
 #endif
 
@@ -506,7 +515,7 @@ static void query_bme680_bsec(uint8_t ch, uint8_t, CayenneLPP& lpp) {
   lpp.addTemperature(ch, bsec_temperature);
   lpp.addRelativeHumidity(ch, bsec_humidity);
   lpp.addBarometricPressure(ch, bsec_pressure_hpa);
-  lpp.addAltitude(ch, 44330.0f * (1.0f - powf(bsec_pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
+  LPP_ADD_ALTITUDE(lpp, ch, 44330.0f * (1.0f - powf(bsec_pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
   lpp.addGenericSensor(ch, (uint16_t)bsec_iaq_val);
   lpp.addAnalogInput(ch, (float)bsec_accuracy);
 }
