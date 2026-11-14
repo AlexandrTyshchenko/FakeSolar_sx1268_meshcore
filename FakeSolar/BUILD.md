@@ -28,7 +28,7 @@
 
 | Файл | Зміна |
 |---|---|
-| `src/helpers/sensors/EnvironmentSensorManager.cpp/.h` | INA3221: пошук на всіх адресах 0x40–0x43, окремий шунт для кожного каналу (`TELEM_INA3221_SHUNT_CH1..3`), канал батареї (`TELEM_INA3221_BAT_CH`) з ознакою заряджання; у debug-збірці — лог знайдених I²C-адрес |
+| `src/helpers/sensors/EnvironmentSensorManager.cpp/.h` | INA3221: пошук на всіх адресах 0x40–0x43, окремий шунт для кожного каналу (`TELEM_INA3221_SHUNT_CH1..3`), канал батареї (`TELEM_INA3221_BAT_CH`) з ознакою заряджання; у debug-збірці — лог знайдених I²C-адрес; `TELEM_NO_ALTITUDE` прибирає висоту барометра з телеметрії |
 | `variants/promicro/PromicroBoard.h` | `ADC_MULTIPLIER` можна задати зі збірки; час вибірки АЦП `BATT_ADC_SAMPLE_TIME_US`; напруга батареї та заряджання з INA3221 |
 
 Зміни INA3221 і лог I²C запропоновані в MeshCore: meshcore-dev/MeshCore#3731, #3732, #3727.
@@ -72,6 +72,7 @@
 | `TELEM_INA3221_BAT_CH` | 2 |
 | `ADC_MULTIPLIER` | 1.5234 (дільник 1.1 МОм / 1.5 МОм) |
 | `BATT_ADC_SAMPLE_TIME_US` | 40 |
+| `TELEM_NO_ALTITUDE` | висота з барометра не йде в телеметрію: MeshMonitor (бібліотека meshcore.js) зупиняє розбір на ній і не бачить INA3221 |
 | `GPS_BAUD_PROBE_LIST` | 9600, 115200, 38400 |
 | `GPS_PERIOD_DEFAULT` | 1800 (GPS раз на 30 хв) |
 | `GPS_GUARD`, `GPS_GUARD_LAT/LON_MIN/MAX` | захист від спуфінгу; регіон 44.0–52.5 пн. ш., 22.0–40.3 сх. д. |
@@ -173,6 +174,7 @@ gps guard          стан захисту GPS
 - годинник, що відставав на 16 хв: GPS не виправив його сам (`time rej step 976s`, більше 10 хв), після `time force` час GPS збігається з годинником (`time ok +0s`), а між вмиканнями GPS показується `time wait`.
 На основі `dev` `c4258a5b` (2026-11-11, repeater): радіо і сенсори; `get/set advert.loc` і стара `gps advert`; `telemetry` без каналу тривоги; спуфінг, що саме йшов, відкинуто (`rej region`, `time rej nofix`).
 На основі `dev` `a4c66307` (2026-11-14, repeater): налаштування після оновлення збереглися (`gps period` 1800); `gps firstfix` показує й змінює ліміт, значення переживає перезавантаження; `gps diag` показує `fm:1` → `fm:3`; під час спуфінгу fix відкинуто (`rej region`), GPS лишається ввімкненим, поки діє ліміт першого fix. Шлях 2D fix на залізі не перевірено (2D fix тут не було).
+`TELEM_NO_ALTITUDE` (2026-11-14, repeater): `telemetry` показує BMP280 без висоти, INA3221 на каналах 4–6 на місці.
 
 ## Що не перевірено
 

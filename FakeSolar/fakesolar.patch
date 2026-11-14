@@ -293,10 +293,26 @@ index bce84191..802de554 100644
  #ifdef SX126X_DIO2_AS_RF_SWITCH
    radio->setDio2AsRfSwitch(SX126X_DIO2_AS_RF_SWITCH);
 diff --git a/src/helpers/sensors/EnvironmentSensorManager.cpp b/src/helpers/sensors/EnvironmentSensorManager.cpp
-index d038031b..e08d1232 100644
+index d038031b..480ec4ed 100644
 --- a/src/helpers/sensors/EnvironmentSensorManager.cpp
 +++ b/src/helpers/sensors/EnvironmentSensorManager.cpp
-@@ -97,8 +97,11 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
+@@ -8,6 +8,15 @@
+ #define TELEM_WIRE &Wire  // Use default I2C bus for Environment Sensors
+ #endif
+ 
++// TELEM_NO_ALTITUDE: leave the barometric altitude out of the telemetry (it is derived from the
++// standard sea level pressure). Some clients stop parsing Cayenne LPP at an unknown type, so a
++// record they do not decode hides every sensor after it.
++#ifdef TELEM_NO_ALTITUDE
++  #define LPP_ADD_ALTITUDE(lpp, ch, value)
++#else
++  #define LPP_ADD_ALTITUDE(lpp, ch, value)  (lpp).addAltitude(ch, value)
++#endif
++
+ // ============================================================
+ // Sensor library includes and static driver instances
+ // ============================================================
+@@ -97,8 +106,11 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
  #endif
  
  #if ENV_INCLUDE_INA3221
@@ -310,7 +326,7 @@ index d038031b..e08d1232 100644
  #endif
  #ifndef TELEM_INA3221_SHUNT_VALUE
  #define TELEM_INA3221_SHUNT_VALUE 0.100 // most variants will have a 0.1 ohm shunts
-@@ -106,8 +109,19 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
+@@ -106,8 +118,19 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
  #ifndef TELEM_INA3221_NUM_CHANNELS
  #define TELEM_INA3221_NUM_CHANNELS 3
  #endif
@@ -330,7 +346,7 @@ index d038031b..e08d1232 100644
  #endif
  
  #if ENV_INCLUDE_INA219
-@@ -171,6 +185,7 @@ static void scanI2CBus(TwoWire* wire, bool found[128]) {
+@@ -171,6 +194,7 @@ static void scanI2CBus(TwoWire* wire, bool found[128]) {
    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
      wire->beginTransmission(addr);
      found[addr] = (wire->endTransmission() == 0);
@@ -338,7 +354,34 @@ index d038031b..e08d1232 100644
    }
  }
  
-@@ -293,16 +308,19 @@ static void query_lps22hb(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+@@ -212,7 +236,7 @@ static void query_bme680(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+     lpp.addRelativeHumidity(ch, BME680.humidity);
+     const float pressure_hpa = BME680.pressure / 100.0f;
+     lpp.addBarometricPressure(ch, pressure_hpa);
+-    lpp.addAltitude(ch, 44330.0f * (1.0f - powf(pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
++    LPP_ADD_ALTITUDE(lpp, ch, 44330.0f * (1.0f - powf(pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
+     lpp.addGenericSensor(ch, BME680.gas_resistance);
+   }
+ }
+@@ -234,7 +258,7 @@ static void query_bme280(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+     lpp.addTemperature(ch, BME280.readTemperature());
+     lpp.addRelativeHumidity(ch, BME280.readHumidity());
+     lpp.addBarometricPressure(ch, BME280.readPressure() / 100);
+-    lpp.addAltitude(ch, BME280.readAltitude(TELEM_BME280_SEALEVELPRESSURE_HPA));
++    LPP_ADD_ALTITUDE(lpp, ch, BME280.readAltitude(TELEM_BME280_SEALEVELPRESSURE_HPA));
+   }
+ }
+ #endif
+@@ -247,7 +271,7 @@ static uint8_t init_bmp280(TwoWire*, uint8_t addr) {
+ static void query_bmp280(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+   lpp.addTemperature(ch, BMP280.readTemperature());
+   lpp.addBarometricPressure(ch, BMP280.readPressure() / 100);
+-  lpp.addAltitude(ch, BMP280.readAltitude(TELEM_BMP280_SEALEVELPRESSURE_HPA));
++  LPP_ADD_ALTITUDE(lpp, ch, BMP280.readAltitude(TELEM_BMP280_SEALEVELPRESSURE_HPA));
+ }
+ #endif
+ 
+@@ -293,16 +317,19 @@ static void query_lps22hb(uint8_t ch, uint8_t, CayenneLPP& lpp) {
  #endif
  
  #if ENV_INCLUDE_INA3221
@@ -359,7 +402,7 @@ index d038031b..e08d1232 100644
    return enabled > 0 ? enabled : 1;
  }
  static void query_ina3221(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
-@@ -322,6 +340,16 @@ static void query_ina3221(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
+@@ -322,6 +349,16 @@ static void query_ina3221(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
      }
    }
  }
@@ -376,7 +419,25 @@ index d038031b..e08d1232 100644
  #endif
  
  #if ENV_INCLUDE_INA219
-@@ -539,7 +567,14 @@ static const SensorDef SENSOR_TABLE[] = {
+@@ -394,7 +431,7 @@ static uint8_t init_bmp085(TwoWire* wire, uint8_t) {
+ static void query_bmp085(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+   lpp.addTemperature(ch, BMP085.readTemperature());
+   lpp.addBarometricPressure(ch, BMP085.readPressure() / 100);
+-  lpp.addAltitude(ch, BMP085.readAltitude(TELEM_BMP085_SEALEVELPRESSURE_HPA * 100));
++  LPP_ADD_ALTITUDE(lpp, ch, BMP085.readAltitude(TELEM_BMP085_SEALEVELPRESSURE_HPA * 100));
+ }
+ #endif
+ 
+@@ -478,7 +515,7 @@ static void query_bme680_bsec(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+   lpp.addTemperature(ch, bsec_temperature);
+   lpp.addRelativeHumidity(ch, bsec_humidity);
+   lpp.addBarometricPressure(ch, bsec_pressure_hpa);
+-  lpp.addAltitude(ch, 44330.0f * (1.0f - powf(bsec_pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
++  LPP_ADD_ALTITUDE(lpp, ch, 44330.0f * (1.0f - powf(bsec_pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
+   lpp.addGenericSensor(ch, (uint16_t)bsec_iaq_val);
+   lpp.addAnalogInput(ch, (float)bsec_accuracy);
+ }
+@@ -539,7 +576,14 @@ static const SensorDef SENSOR_TABLE[] = {
    { 0x5C,                  "LPS22HB",      init_lps22hb,  query_lps22hb  },
  #endif
  #if ENV_INCLUDE_INA3221
@@ -427,10 +488,10 @@ index 425415a1..cbe3e9a9 100644
    static const int MAX_ACTIVE_SENSORS = 16;
 diff --git a/variants/fakesolar_sx1268/platformio.ini b/variants/fakesolar_sx1268/platformio.ini
 new file mode 100644
-index 00000000..894f2146
+index 00000000..eff8d043
 --- /dev/null
 +++ b/variants/fakesolar_sx1268/platformio.ini
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,107 @@
 +; FakeSolar: Faketec (ProMicro nRF52840) + E22-400M22S (SX1268) + AHT20/BMP280/BME280 + INA3221 + PCF8563 + GPS
 +; Based on fdlamotte/gps_refactor (GPS refactor with GPS_GUARD and the baud probe list).
 +; Board sources are shared with variants/promicro.
@@ -479,6 +540,9 @@ index 00000000..894f2146
 +  -D TELEM_INA3221_BAT_CH=2
 +  -D ADC_MULTIPLIER=1.5234f
 +  -D BATT_ADC_SAMPLE_TIME_US=40
++  ; no barometric altitude in telemetry: MeshMonitor (meshcore.js) stops parsing at it,
++  ; and loses the INA3221 channels after it
++  -D TELEM_NO_ALTITUDE
 +
 +[env:Faketec_SX1268_repeater]
 +extends = Faketec_SX1268
